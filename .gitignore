@@ -1,34 +1,41 @@
-# Gradle files
-.gradle/
-build/
+name: Build ToracoKey AI
 
-# Local configuration file (sdk path, etc)
-local.properties
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
-# Log/OS Files
-*.log
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-# Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.aab
-*.apk
-output-metadata.json
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-# IntelliJ
-*.iml
-.idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
+      - name: Extract project ZIP
+        run: |
+          mkdir extracted
+          unzip -q ToracoKeyAI_v0.1.zip -d extracted
 
-# Keystore files
-*.jks
-*.keystore
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-# Google Services (e.g. APIs or Firebase)
-google-services.json
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
-# Android Profiling
-*.hprof
+      - name: Build APK
+        working-directory: extracted/ToracoKeyAI
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToracoKeyAI-debug
+          path: extracted/ToracoKeyAI/app/build/outputs/apk/debug/app-debug.apk
