@@ -19,6 +19,12 @@ jobs:
           mkdir extracted
           unzip -q ToracoKeyAI_v0.1.zip -d extracted
 
+      - name: Enable AndroidX
+        working-directory: extracted
+        run: |
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
