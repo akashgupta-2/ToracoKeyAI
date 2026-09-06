@@ -14,15 +14,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check fixed v0.9 ZIP
+      - name: Check FINAL v0.9 ZIP
         run: |
-          test -f ToracoKeyAI_v0.9_AI_MultiAnswer_SizeFix_FIXED.zip
+          test -f ToracoKeyAI_v0.9_AI_MultiAnswer_SizeFix_FINAL.zip
 
-      - name: Extract fixed v0.9 ZIP
+      - name: Extract FINAL v0.9 ZIP
         run: |
           rm -rf extracted
           mkdir extracted
-          unzip -q ToracoKeyAI_v0.9_AI_MultiAnswer_SizeFix_FIXED.zip -d extracted
+          unzip -q ToracoKeyAI_v0.9_AI_MultiAnswer_SizeFix_FINAL.zip -d extracted
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
