@@ -31,11 +31,11 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Build APK
-        working-directory: extracted/ToracoKeyAI
+        working-directory: extracted
         run: gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-debug
-          path: extracted/ToracoKeyAI/app/build/outputs/apk/debug/app-debug.apk
+          path: extracted/app/build/outputs/apk/debug/app-debug.apk
