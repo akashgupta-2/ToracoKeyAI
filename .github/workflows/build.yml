@@ -16,14 +16,13 @@ jobs:
 
       - name: Check v0.17 ZIP
         run: |
-          test -f ToracoKeyAI_v0.17_Gboard_TouchFix.zip
-          echo "Found v0.17 ZIP"
+          test -f ToracoKeyAI_v0.17_Voice_Retry_TouchFix.zip
 
       - name: Extract v0.17 ZIP
         run: |
           rm -rf extracted
           mkdir extracted
-          unzip -q ToracoKeyAI_v0.17_Gboard_TouchFix.zip -d extracted
+          unzip -q ToracoKeyAI_v0.17_Voice_Retry_TouchFix.zip -d extracted
           test -f extracted/v017/settings.gradle.kts
 
       - name: Set up Java 17
