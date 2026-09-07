@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.18
+name: Build ToracoKey AI v0.19
 
 on:
   workflow_dispatch:
@@ -14,16 +14,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check v0.18 ZIP
+      - name: Check v0.19 ZIP
         run: |
-          test -f ToracoKeyAI_v0.18_StableModeSelector_FINAL.zip
-          echo "Found v0.18 ZIP"
+          test -f ToracoKeyAI_v0.19_SafeModeSwitch_FINAL.zip
+          echo "Found v0.19 ZIP"
 
-      - name: Extract v0.18 ZIP
+      - name: Extract v0.19 ZIP
         run: |
           rm -rf extracted
           mkdir extracted
-          unzip -q ToracoKeyAI_v0.18_StableModeSelector_FINAL.zip -d extracted
+          unzip -q ToracoKeyAI_v0.19_SafeModeSwitch_FINAL.zip -d extracted
           test -f extracted/v017/settings.gradle.kts
 
       - name: Set up Java 17
@@ -44,5 +44,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.18-debug
+          name: ToracoKeyAI-v0.19-debug
           path: extracted/v017/app/build/outputs/apk/debug/app-debug.apk
