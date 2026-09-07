@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.17 Voice Insert Fix
+name: Build ToracoKey AI v0.17 Voice Insert Fix 2
 
 on:
   workflow_dispatch:
@@ -17,13 +17,13 @@ jobs:
       - name: Check v0.17 ZIP
         run: |
           test -f ToracoKeyAI_v0.17_Voice_InsertFix2.zip
-          echo "Found v0.17 Voice Insert Fix ZIP"
+          echo "Found v0.17 Voice Insert Fix 2 ZIP"
 
       - name: Extract v0.17 ZIP
         run: |
           rm -rf extracted
           mkdir extracted
-          unzip -q ToracoKeyAI_v0.17_Voice_InsertFix.zip -d extracted
+          unzip -q ToracoKeyAI_v0.17_Voice_InsertFix2.zip -d extracted
           test -f extracted/v017/settings.gradle.kts
 
       - name: Set up Java 17
@@ -44,5 +44,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.17-Voice-InsertFix
+          name: ToracoKeyAI-v0.17-Voice-InsertFix2
           path: extracted/v017/app/build/outputs/apk/debug/app-debug.apk
