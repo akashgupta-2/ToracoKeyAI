@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.17 Voice Direct Insert Fix 2
+name: Build ToracoKey AI v0.17 Voice Mode Crash Fix
 
 on:
   workflow_dispatch:
@@ -16,14 +16,14 @@ jobs:
 
       - name: Check v0.17 ZIP
         run: |
-          test -f ToracoKeyAI_v0.17_Voice_DirectInsertFix2_FINAL.zip
-          echo "Found v0.17 Voice Direct Insert Fix 2 FINAL ZIP"
+          test -f ToracoKeyAI_v0.17_Voice_ModeCrashFix_FINAL.zip
+          echo "Found v0.17 Voice Mode Crash Fix FINAL ZIP"
 
       - name: Extract v0.17 ZIP
         run: |
           rm -rf extracted
           mkdir extracted
-          unzip -q ToracoKeyAI_v0.17_Voice_DirectInsertFix2_FINAL.zip -d extracted
+          unzip -q ToracoKeyAI_v0.17_Voice_ModeCrashFix_FINAL.zip -d extracted
           test -f extracted/v017/settings.gradle.kts
 
       - name: Set up Java 17
@@ -44,5 +44,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.17-Voice-DirectInsertFix2
+          name: ToracoKeyAI-v0.17-Voice-ModeCrashFix
           path: extracted/v017/app/build/outputs/apk/debug/app-debug.apk
