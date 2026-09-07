@@ -16,7 +16,7 @@ jobs:
 
       - name: Check v0.17 ZIP
         run: |
-          test -f ToracoKeyAI_v0.17_Voice_InsertFix.zip
+          test -f ToracoKeyAI_v0.17_Voice_InsertFix2.zip
           echo "Found v0.17 Voice Insert Fix ZIP"
 
       - name: Extract v0.17 ZIP
