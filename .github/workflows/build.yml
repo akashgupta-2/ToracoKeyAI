@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.22
+name: Build ToracoKey AI v0.23
 
 on:
   workflow_dispatch:
@@ -14,12 +14,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find v0.22 ZIP
+      - name: Find v0.23 ZIP
         run: |
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*v0.22*.zip' | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*v0.23*.zip' | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No v0.22 ZIP found in repository root."
+            echo "ERROR: No v0.23 ZIP found in repository root."
             echo "Files currently in repository:"
             ls -la
             exit 1
@@ -28,7 +28,7 @@ jobs:
           echo "Found: $ZIP_FILE"
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
-      - name: Extract v0.22 ZIP
+      - name: Extract v0.23 ZIP
         run: |
           rm -rf extracted
           mkdir extracted
@@ -47,6 +47,7 @@ jobs:
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS")
+
           echo "Android project: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
@@ -63,10 +64,11 @@ jobs:
 
       - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle :app:assembleDebug --no-daemon
+        run: |
+          gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.22-debug
+          name: ToracoKeyAI-v0.23-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
