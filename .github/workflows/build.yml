@@ -25,22 +25,36 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Extract ToracoKey ZIP
+        run: |
+          ZIP_FILE="ToracoKeyAI_v0.31_NumberFace_TimeDate.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "Error: $ZIP_FILE not found."
+            echo "Files in repository:"
+            find . -maxdepth 2 -type f
+            exit 1
+          fi
+
+          mkdir -p extracted_project
+          unzip -o "$ZIP_FILE" -d extracted_project
+
       - name: Find Android project
         shell: bash
         run: |
-          SETTINGS_FILE=$(find . -type f \
+          SETTINGS_FILE=$(find extracted_project -type f \
             \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
-            -not -path "*/build/*" \
             -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
             echo "Error: Gradle settings file not found."
+            find extracted_project -maxdepth 4 -type f
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
 
-          echo "Android project: $PROJECT_DIR"
+          echo "Project found at: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Verify project files
