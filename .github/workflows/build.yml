@@ -25,11 +25,36 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Find Android project
+        shell: bash
+        run: |
+          SETTINGS_FILE=$(find . -type f \
+            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            -not -path "*/build/*" \
+            -print -quit)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "Error: Gradle settings file not found."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "Android project: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify project files
+        run: |
+          echo "Project directory: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
       - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
         run: gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-v0.31-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
