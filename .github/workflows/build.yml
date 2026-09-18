@@ -1,4 +1,4 @@
-name: Build ToracoKey V5.7
+name: Build ToracoKey AI v0.33
 
 on:
   workflow_dispatch:
@@ -11,89 +11,65 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Find and extract ToracoKey ZIP
-        shell: bash
-        run: |
-          set -e
-
-          ZIP=$(find . -maxdepth 1 -type f \
-            \( -iname 'ToracoKey*.zip' -o -iname 'toraco-key*.zip' -o -iname '*.zip' \) \
-            -print -quit)
-
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: No ToracoKey ZIP found"
-            ls -la
-            exit 1
-          fi
-
-          echo "Found ZIP: $ZIP"
-
-          rm -rf extracted
-          mkdir -p extracted
-          unzip -q "$ZIP" -d extracted
-
-      - name: Locate Gradle project
-        shell: bash
-        run: |
-          set -e
-
-          SETTINGS=$(find extracted -type f \
-            \( -name settings.gradle.kts -o -name settings.gradle \) \
-            -print -quit)
-
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: No Gradle project found"
-            find extracted -type f | head -300
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$SETTINGS")
-
-          echo "Gradle project: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
-      - name: Build ToracoKey V5.7
+      - name: Extract ToracoKey v0.33 ZIP
         shell: bash
         run: |
-          set -e
-          cd "$PROJECT_DIR"
+          ZIP_FILE="ToracoKeyAI_v0.33_Backspace_Date_Time_Smooth.zip"
 
-          if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon
-          else
-            gradle assembleDebug --no-daemon
-          fi
-
-      - name: Find APK
-        shell: bash
-        run: |
-          set -e
-
-          APK=$(find "$PROJECT_DIR" -type f -name '*.apk' -print -quit)
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK not found"
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: $ZIP_FILE not found."
+            echo "Available ZIP files:"
+            find . -type f -name "*.zip"
             exit 1
           fi
 
-          echo "APK found: $APK"
-          cp "$APK" "$GITHUB_WORKSPACE/ToracoKey-V5.7.apk"
+          mkdir -p extracted_project
+          unzip -o "$ZIP_FILE" -d extracted_project
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          SETTINGS_FILE=$(find extracted_project -type f \
+            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            -print -quit)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: Gradle settings file not found."
+            find extracted_project -maxdepth 5 -type f
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "Project found at: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify Android project
+        run: |
+          echo "Project directory: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
+      - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKey-V5.7-APK
-          path: ToracoKey-V5.7.apk
+          name: ToracoKeyAI-v0.33-debug
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
