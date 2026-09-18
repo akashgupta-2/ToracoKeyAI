@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.33
+name: Build ToracoKey AI v0.34
 
 on:
   workflow_dispatch:
@@ -25,15 +25,14 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Extract ToracoKey v0.33 ZIP
+      - name: Extract ToracoKey v0.34 ZIP
         shell: bash
         run: |
-          ZIP_FILE="ToracoKeyAI_v0.33_Backspace_Date_Time_Smooth.zip"
+          ZIP_FILE="ToracoKeyAI_v0.34_SymbolSwitch_NoRepeats.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: $ZIP_FILE not found."
-            echo "Available ZIP files:"
-            find . -type f -name "*.zip"
+            echo "ERROR: ZIP file not found!"
+            find . -maxdepth 2 -type f
             exit 1
           fi
 
@@ -48,28 +47,31 @@ jobs:
             -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Gradle settings file not found."
+            echo "ERROR: Gradle settings file not found!"
             find extracted_project -maxdepth 5 -type f
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
 
-          echo "Project found at: $PROJECT_DIR"
+          echo "Android project found at: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify Android project
+      - name: Verify project files
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          echo "Project directory: $PROJECT_DIR"
-          ls -la "$PROJECT_DIR"
+          echo "Project directory:"
+          pwd
+          ls -la
 
       - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle :app:assembleDebug --no-daemon
+        run: |
+          gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.33-debug
+          name: ToracoKeyAI-v0.34-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
