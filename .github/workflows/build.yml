@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.36
+name: Build ToracoKey AI v0.37
 
 on:
   workflow_dispatch:
@@ -25,14 +25,15 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Extract ToracoKey v0.36 ZIP
+      - name: Extract ToracoKey v0.37 ZIP
         shell: bash
         run: |
-          ZIP_FILE="ToracoKeyAI_v0.36_UniqueSymbols_Apostrophe.zip"
+          ZIP_FILE="ToracoKeyAI_v0.37.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found!"
-            find . -maxdepth 2 -type f
+            echo "ERROR: $ZIP_FILE not found!"
+            echo "Available ZIP files:"
+            find . -maxdepth 2 -type f -name "*.zip"
             exit 1
           fi
 
@@ -57,10 +58,13 @@ jobs:
           echo "Android project found at: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify project files
+      - name: Verify Android project
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
+          echo "Project directory:"
           pwd
+          echo
+          echo "Project files:"
           ls -la
 
       - name: Build Debug APK
@@ -71,6 +75,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.36-debug
+          name: ToracoKeyAI-v0.37-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
