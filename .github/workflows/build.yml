@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.37
+name: Build ToracoKey AI
 
 on:
   workflow_dispatch:
@@ -22,59 +22,33 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
 
       - name: Extract ToracoKey v0.37 ZIP
         shell: bash
         run: |
-          ZIP_FILE="ToracoKeyAI_v0.37.zip"
+          set -e
+
+          ZIP_FILE="ToracoKeyAI_v0.37_UserControl.zip"
+
+          echo "Looking for: $ZIP_FILE"
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "ERROR: $ZIP_FILE not found!"
             echo "Available ZIP files:"
-            find . -maxdepth 2 -type f -name "*.zip"
+            find . -maxdepth 2 -type f -iname "*.zip" -print
             exit 1
           fi
 
-          mkdir -p extracted_project
-          unzip -o "$ZIP_FILE" -d extracted_project
+          rm -rf toracokey_project
+          mkdir -p toracokey_project
+
+          unzip -q "$ZIP_FILE" -d toracokey_project
+
+          echo "ZIP extracted successfully."
 
       - name: Find Android project
         shell: bash
         run: |
-          SETTINGS_FILE=$(find extracted_project -type f \
-            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
-            -print -quit)
+          set -e
 
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Gradle settings file not found!"
-            find extracted_project -maxdepth 5 -type f
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-
-          echo "Android project found at: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Verify Android project
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          echo "Project directory:"
-          pwd
-          echo
-          echo "Project files:"
-          ls -la
-
-      - name: Build Debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          gradle :app:assembleDebug --no-daemon
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ToracoKeyAI-v0.37-debug
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          PROJECT
