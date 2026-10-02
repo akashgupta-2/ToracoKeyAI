@@ -25,18 +25,35 @@ jobs:
         with:
           packages: ''
 
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
+      - name: Find Android project
+        run: |
+          PROJECT_DIR=$(dirname "$(find . -name settings.gradle.kts -print -quit)")
+          echo "Android project found at: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
       - name: Build debug APK
-        working-directory: ToracoKeyAI
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare APK
+        run: |
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" \
+             "$GITHUB_WORKSPACE/ToracoKeyAI-v0.37.1-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-v0.37.1-debug
-          path: ToracoKeyAI/app/build/outputs/apk/debug/app-debug.apk
+          path: ToracoKeyAI-v0.37.1-debug.apk
           if-no-files-found: error
