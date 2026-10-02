@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.37
+name: Build ToracoKey AI
 
 on:
   workflow_dispatch:
@@ -11,100 +11,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Find and extract v0.37 project ZIP
-        shell: bash
-        run: |
-          ZIP_FILE=$(find . -maxdepth 2 -type f \
-            -iname "ToracoKeyAI_v0.37*.zip" \
-            -print -quit)
+      - name: Make Gradle executable
+        run: chmod +x gradlew
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ToracoKey AI v0.37 ZIP was not found."
-            echo ""
-            echo "ZIP files currently in repository:"
-            find . -type f -name "*.zip"
-            exit 1
-          fi
-
-          echo "Found ZIP:"
-          echo "$ZIP_FILE"
-
-          mkdir -p extracted_project
-          unzip -o "$ZIP_FILE" -d extracted_project
-
-      - name: Find Android project
-        shell: bash
-        run: |
-          SETTINGS_FILE=$(find extracted_project -type f \
-            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
-            -print -quit)
-
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Gradle settings file not found."
-
-            echo "Extracted files:"
-            find extracted_project -maxdepth 6 -type f
-
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-
-          echo "Android project found at:"
-          echo "$PROJECT_DIR"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Verify project
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          echo "Project directory:"
-          pwd
-
-          echo ""
-          echo "Project files:"
-          ls -la
-
-          echo ""
-          echo "Gradle files:"
-          find . -maxdepth 3 -type f \
-            \( -name "build.gradle*" -o -name "settings.gradle*" \)
-
-      - name: Build Debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          gradle :app:assembleDebug --no-daemon
-
-      - name: Verify APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          echo "APK successfully generated:"
-          ls -lh "$APK"
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37-debug
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKey-AI-v0.37.1-debug
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
