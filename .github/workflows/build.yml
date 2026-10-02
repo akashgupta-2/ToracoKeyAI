@@ -1,4 +1,4 @@
-name: Build ToracoKey AI
+name: Build ToracoKey AI v0.37.1
 
 on:
   workflow_dispatch:
@@ -28,14 +28,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.11.1'
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKey-AI-v0.37.1-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: ToracoKeyAI-v0.37.1-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
