@@ -1,10 +1,10 @@
 name: Build ToracoKey AI v0.37.3
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
@@ -25,20 +25,15 @@ jobs:
           java-version: '17'
 
       - name: Prepare Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
         run: |
-          set -e
-
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
 
       - name: Find Android project
         shell: bash
@@ -47,17 +42,29 @@ jobs:
 
           echo "Searching for Android Gradle project..."
 
-          PROJECT_DIR=$(find . -name "settings.gradle.kts" -type f -print -quit | xargs dirname)
+          SETTINGS_FILE="$(find . -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -not -path './.git/*' | head -n 1)"
 
-          if [ -z "$PROJECT_DIR" ] || [ "$PROJECT_DIR" = "." ]; then
-            PROJECT_DIR="."
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: No settings.gradle or settings.gradle.kts found."
+            echo "Repository contents:"
+            find . -maxdepth 3 -type f | sort
+            exit 1
           fi
 
-          echo "Android project found at:"
-          echo "$PROJECT_DIR"
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
 
-          echo "Project contents:"
-          ls -la "$PROJECT_DIR"
+          echo "Found settings file: $SETTINGS_FILE"
+          echo "Android project directory: $PROJECT_DIR"
+
+          if [ ! -f "$PROJECT_DIR/build.gradle" ] && [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
+            echo "ERROR: No root build.gradle or build.gradle.kts found beside settings file."
+            exit 1
+          fi
+
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "ERROR: app directory not found in $PROJECT_DIR"
+            exit 1
+          fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
@@ -65,21 +72,21 @@ jobs:
         shell: bash
         run: |
           set -e
-
           cd "$PROJECT_DIR"
 
-          echo "Building from:"
-          pwd
+          echo "Building from: $(pwd)"
 
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          else
+            gradle :app:assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Verify APK
         shell: bash
         run: |
           set -e
-
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
@@ -87,12 +94,12 @@ jobs:
             exit 1
           fi
 
-          echo "APK successfully created:"
+          echo "APK found: $APK"
           ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37.3-debug
+          name: ToracoKey-AI-v0.37.3-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
