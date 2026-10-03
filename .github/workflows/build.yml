@@ -65,4 +65,27 @@ jobs:
           set -e
 
           gradle :app:assembleDebug \
-            --no-daemon
+            --no-daemon \
+            --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -e
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not created."
+            exit 1
+          fi
+
+          echo "APK successfully created:"
+          ls -lh "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToracoKeyAI-v0.37.3-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
