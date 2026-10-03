@@ -22,12 +22,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
+        with:
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -39,22 +38,14 @@ jobs:
         run: |
           set -e
 
+          echo "Checking Android project..."
+
           test -f settings.gradle.kts
           test -f build.gradle.kts
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
 
-          echo "======================================"
-          echo "Android project verified"
-          echo "======================================"
-
-          echo "Project root:"
-          pwd
-
-          echo "settings.gradle.kts: OK"
-          echo "build.gradle.kts: OK"
-          echo "app/build.gradle.kts: OK"
-          echo "AndroidManifest.xml: OK"
+          echo "Android project verified successfully."
 
       - name: Verify AI request fix
         shell: bash
@@ -65,7 +56,7 @@ jobs:
 
           test -f "$FILE"
 
-          echo "Checking ToracoKeyService.kt..."
+          echo "Checking AI request fix..."
 
           grep -q "askBackendWithRetry(question)" "$FILE"
 
@@ -84,7 +75,10 @@ jobs:
 
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          test -f "$APK"
+          if [ ! -f "$APK" ]; then
+            echo "APK was not created."
+            exit 1
+          fi
 
           echo "======================================"
           echo "APK BUILD SUCCESSFUL"
