@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.37.3
+name: Build ToracoKey AI v0.37.3 AI Fixed
 
 on:
   push:
@@ -46,22 +46,15 @@ jobs:
           ZIP_FILE="ToracoKeyAI_v0.37.3_Android_BuildReady.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: $ZIP_FILE not found."
-            echo "ZIP files in repository:"
+            echo "ERROR: Android ZIP not found."
             find . -maxdepth 2 -type f -name "*.zip"
             exit 1
           fi
 
-          echo "Found Android ZIP:"
-          ls -lh "$ZIP_FILE"
-
           mkdir -p android-source
-
           unzip -q "$ZIP_FILE" -d android-source
 
-          echo "ZIP extracted successfully."
-
-          echo "Searching for Gradle project..."
+          echo "Android project extracted."
 
           SETTINGS_FILE="$(find android-source -type f \( \
             -name 'settings.gradle' \
@@ -69,20 +62,13 @@ jobs:
           \) | head -n 1)"
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: No settings.gradle or settings.gradle.kts found inside ZIP."
-
-            echo "Extracted files:"
-            find android-source -maxdepth 5 -type f | sort
-
+            echo "ERROR: No settings.gradle or settings.gradle.kts found."
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
 
-          echo "Found settings file:"
-          echo "$SETTINGS_FILE"
-
-          echo "Android project directory:"
+          echo "Project directory:"
           echo "$PROJECT_DIR"
 
           if [ ! -d "$PROJECT_DIR/app" ]; then
@@ -90,13 +76,32 @@ jobs:
             exit 1
           fi
 
-          if [ -f "$PROJECT_DIR/gradlew" ]; then
-            echo "Gradle wrapper found."
-          else
-            echo "Gradle wrapper not found. System Gradle will be used."
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Replace ToracoKeyService with AI-fixed version
+        shell: bash
+        run: |
+          set -e
+
+          FIXED_FILE="ToracoKeyService_v0.37.3_AI_Fixed.kt"
+
+          if [ ! -f "$FIXED_FILE" ]; then
+            echo "ERROR: $FIXED_FILE not found in repository."
+            exit 1
           fi
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          TARGET="$(find "$PROJECT_DIR/app/src/main" -type f \
+            -name 'ToracoKeyService.kt' | head -n 1)"
+
+          if [ -z "$TARGET" ]; then
+            echo "ERROR: Original ToracoKeyService.kt not found."
+            exit 1
+          fi
+
+          cp "$FIXED_FILE" "$TARGET"
+
+          echo "AI-fixed ToracoKeyService.kt installed."
+          echo "Target: $TARGET"
 
       - name: Build debug APK
         shell: bash
@@ -104,9 +109,6 @@ jobs:
           set -e
 
           cd "$PROJECT_DIR"
-
-          echo "Building from:"
-          pwd
 
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
@@ -133,6 +135,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKey-AI-v0.37.3-debug
+          name: ToracoKey-AI-v0.37.3-AI-Fixed-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
