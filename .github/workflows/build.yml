@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.37.3 FINAL2
+name: Build ToracoKey AI v0.37.3
 
 on:
   workflow_dispatch:
@@ -22,132 +22,79 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses || true
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      - name: Find FINAL2 ZIP
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Verify Android project
         shell: bash
         run: |
           set -e
 
-          ZIP_FILE="ToracoKeyAI_v0.37.3_GBoard_Number_Page_FINAL2.zip"
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
 
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: FINAL2 ZIP not found:"
-            echo "$ZIP_FILE"
-            echo ""
-            echo "ZIP files in repository:"
-            find . -type f -iname "*.zip" -print
-            exit 1
-          fi
+          echo "======================================"
+          echo "Android project verified"
+          echo "======================================"
 
-          echo "Using:"
-          echo "$ZIP_FILE"
+          echo "Project root:"
+          pwd
 
-          rm -rf extracted-project
-          mkdir -p extracted-project
+          echo "settings.gradle.kts: OK"
+          echo "build.gradle.kts: OK"
+          echo "app/build.gradle.kts: OK"
+          echo "AndroidManifest.xml: OK"
 
-          unzip -q "$ZIP_FILE" -d extracted-project
-
-      - name: Locate Android project
+      - name: Verify AI request fix
         shell: bash
         run: |
           set -e
 
-          SETTINGS_FILE=$(find extracted-project \
-            -type f \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            -print -quit)
+          FILE="app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
 
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Android project not found inside FINAL2 ZIP."
-            find extracted-project -maxdepth 6 -type f -print
-            exit 1
-          fi
+          test -f "$FILE"
 
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          echo "Checking ToracoKeyService.kt..."
 
-          echo "Android project:"
-          echo "$PROJECT_DIR"
+          grep -q "askBackendWithRetry(question)" "$FILE"
 
-          echo "$PROJECT_DIR" > android_project_path.txt
-
-      - name: Verify FINAL2 keyboard source
-        shell: bash
-        run: |
-          set -e
-
-          PROJECT_DIR=$(cat android_project_path.txt)
-
-          KEYBOARD="$PROJECT_DIR/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt"
-
-          if [ ! -f "$KEYBOARD" ]; then
-            echo "ERROR: QwertyKeyboard.kt not found."
-            exit 1
-          fi
-
-          echo "QwertyKeyboard.kt found."
-
-          echo "Checking preserved controls..."
-
-          grep -q "Date" "$KEYBOARD"
-          grep -q "Time" "$KEYBOARD"
-          grep -q "#=+" "$KEYBOARD"
-
-          echo "Date found."
-          echo "Time found."
-          echo "#=+ switcher found."
-
-          echo "Keyboard source verification passed."
+          echo "AI request fix found."
 
       - name: Build debug APK
-        shell: bash
         run: |
-          set -e
-
-          PROJECT_DIR=$(cat android_project_path.txt)
-
-          cd "$PROJECT_DIR"
-
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew :app:assembleDebug --no-daemon --stacktrace
-          else
-            gradle :app:assembleDebug --no-daemon --stacktrace
-          fi
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
 
       - name: Verify APK
         shell: bash
         run: |
           set -e
 
-          PROJECT_DIR=$(cat android_project_path.txt)
+          APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          APK=$(find "$PROJECT_DIR" \
-            -type f \
-            -path "*/build/outputs/apk/debug/*.apk" \
-            -print -quit)
+          test -f "$APK"
 
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
+          echo "======================================"
+          echo "APK BUILD SUCCESSFUL"
+          echo "======================================"
 
-          echo "APK successfully generated:"
           ls -lh "$APK"
-
-          cp "$APK" ToracoKeyAI-v0.37.3-FINAL2-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37.3-FINAL2-GBoard-Number-Page
-          path: ToracoKeyAI-v0.37.3-FINAL2-debug.apk
+          name: ToracoKeyAI-v0.37.3-AI-Request-Fixed
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
