@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.37.3 AI Fixed
+name: Build ToracoKey AI v0.37.3 Header Fixed
 
 on:
   push:
@@ -33,7 +33,10 @@ jobs:
         shell: bash
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -43,15 +46,17 @@ jobs:
         run: |
           set -e
 
-          ZIP_FILE="ToracoKeyAI_v0.37.3_Android_BuildReady.zip"
+          ZIP_FILE="ToracoKeyAI_v0.37.3_AI_Header_Fixed_BuildReady.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "ERROR: Android ZIP not found."
+            echo "ZIP files available:"
             find . -maxdepth 2 -type f -name "*.zip"
             exit 1
           fi
 
           mkdir -p android-source
+
           unzip -q "$ZIP_FILE" -d android-source
 
           echo "Android project extracted."
@@ -78,30 +83,33 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Replace ToracoKeyService with AI-fixed version
+      - name: Verify AI header-fixed service
         shell: bash
         run: |
           set -e
-
-          FIXED_FILE="ToracoKeyService_v0.37.3_AI_Fixed.kt"
-
-          if [ ! -f "$FIXED_FILE" ]; then
-            echo "ERROR: $FIXED_FILE not found in repository."
-            exit 1
-          fi
 
           TARGET="$(find "$PROJECT_DIR/app/src/main" -type f \
             -name 'ToracoKeyService.kt' | head -n 1)"
 
           if [ -z "$TARGET" ]; then
-            echo "ERROR: Original ToracoKeyService.kt not found."
+            echo "ERROR: ToracoKeyService.kt not found."
             exit 1
           fi
 
-          cp "$FIXED_FILE" "$TARGET"
+          echo "Using:"
+          echo "$TARGET"
 
-          echo "AI-fixed ToracoKeyService.kt installed."
-          echo "Target: $TARGET"
+          if ! grep -q "X-ToracoKey-Device" "$TARGET"; then
+            echo "ERROR: AI device header fix is missing."
+            exit 1
+          fi
+
+          if ! grep -q '"deviceId"' "$TARGET"; then
+            echo "ERROR: deviceId request field is missing."
+            exit 1
+          fi
+
+          echo "AI header fix verified successfully."
 
       - name: Build debug APK
         shell: bash
@@ -135,6 +143,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKey-AI-v0.37.3-AI-Fixed-debug
+          name: ToracoKey-AI-v0.37.3-Header-Fixed-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
