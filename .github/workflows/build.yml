@@ -23,10 +23,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -37,8 +34,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          echo "Checking Android project..."
 
           test -f settings.gradle.kts
           test -f build.gradle.kts
@@ -55,8 +50,6 @@ jobs:
           FILE="app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
 
           test -f "$FILE"
-
-          echo "Checking AI request fix..."
 
           grep -q "askBackendWithRetry(question)" "$FILE"
 
@@ -75,10 +68,7 @@ jobs:
 
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          if [ ! -f "$APK" ]; then
-            echo "APK was not created."
-            exit 1
-          fi
+          test -f "$APK"
 
           echo "======================================"
           echo "APK BUILD SUCCESSFUL"
