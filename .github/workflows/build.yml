@@ -35,9 +35,57 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Find Android project
+      - name: Find and prepare Android project
+        shell: bash
         run: |
-          PROJECT_DIR=$(dirname "$(find . -name settings.gradle.kts -print -quit)")
+          set -e
+
+          PROJECT_DIR=""
+
+          # First check whether the project is already extracted.
+          FOUND=$(find . \
+            -type f \
+            -name "settings.gradle.kts" \
+            -not -path "./.git/*" \
+            -print -quit)
+
+          if [ -n "$FOUND" ]; then
+            PROJECT_DIR=$(dirname "$FOUND")
+          fi
+
+          # If the project is inside a ZIP, extract it.
+          if [ -z "$PROJECT_DIR" ]; then
+            ZIP_FILE=$(find . \
+              -type f \
+              -name "*.zip" \
+              -not -path "./.git/*" \
+              -print -quit)
+
+            if [ -n "$ZIP_FILE" ]; then
+              echo "Found project ZIP: $ZIP_FILE"
+
+              mkdir -p extracted
+
+              unzip -o "$ZIP_FILE" -d extracted
+
+              FOUND=$(find extracted \
+                -type f \
+                -name "settings.gradle.kts" \
+                -print -quit)
+
+              if [ -n "$FOUND" ]; then
+                PROJECT_DIR=$(dirname "$FOUND")
+              fi
+            fi
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android Gradle project not found."
+            echo "Repository contents:"
+            find . -maxdepth 4 -type f | sort
+            exit 1
+          fi
+
           echo "Android project found at: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
@@ -49,7 +97,7 @@ jobs:
       - name: Prepare APK
         run: |
           cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" \
-             "$GITHUB_WORKSPACE/ToracoKeyAI-v0.37.1-debug.apk"
+            "$GITHUB_WORKSPACE/ToracoKeyAI-v0.37.1-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
