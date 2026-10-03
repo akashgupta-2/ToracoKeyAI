@@ -38,38 +38,62 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Find Android project
+      - name: Extract Android project
         shell: bash
         run: |
           set -e
 
-          echo "Searching for Android Gradle project..."
+          ZIP_FILE="ToracoKeyAI_v0.37.3_Android_BuildReady.zip"
 
-          SETTINGS_FILE="$(find . -type f \( \
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: $ZIP_FILE not found."
+            echo "ZIP files in repository:"
+            find . -maxdepth 2 -type f -name "*.zip"
+            exit 1
+          fi
+
+          echo "Found Android ZIP:"
+          ls -lh "$ZIP_FILE"
+
+          mkdir -p android-source
+
+          unzip -q "$ZIP_FILE" -d android-source
+
+          echo "ZIP extracted successfully."
+
+          echo "Searching for Gradle project..."
+
+          SETTINGS_FILE="$(find android-source -type f \( \
             -name 'settings.gradle' \
             -o -name 'settings.gradle.kts' \
-          \) -not -path './.git/*' | head -n 1)"
+          \) | head -n 1)"
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: No settings.gradle or settings.gradle.kts found."
-            find . -maxdepth 4 -type f | sort
+            echo "ERROR: No settings.gradle or settings.gradle.kts found inside ZIP."
+
+            echo "Extracted files:"
+            find android-source -maxdepth 5 -type f | sort
+
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
 
-          echo "Found settings file: $SETTINGS_FILE"
-          echo "Android project directory: $PROJECT_DIR"
+          echo "Found settings file:"
+          echo "$SETTINGS_FILE"
 
-          if [ ! -f "$PROJECT_DIR/build.gradle" ] && \
-             [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
-            echo "ERROR: Root build.gradle or build.gradle.kts not found."
+          echo "Android project directory:"
+          echo "$PROJECT_DIR"
+
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "ERROR: app directory not found."
             exit 1
           fi
 
-          if [ ! -d "$PROJECT_DIR/app" ]; then
-            echo "ERROR: app directory not found in $PROJECT_DIR"
-            exit 1
+          if [ -f "$PROJECT_DIR/gradlew" ]; then
+            echo "Gradle wrapper found."
+          else
+            echo "Gradle wrapper not found. System Gradle will be used."
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
@@ -103,7 +127,7 @@ jobs:
             exit 1
           fi
 
-          echo "APK found:"
+          echo "APK successfully created:"
           ls -lh "$APK"
 
       - name: Upload APK
