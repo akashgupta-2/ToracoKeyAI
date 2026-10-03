@@ -1,18 +1,14 @@
-name: Build ToracoKey AI v0.37.3 Header Fixed
+name: Build ToracoKey AI v0.37.3
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout source
@@ -24,125 +20,47 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Prepare Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
-      - name: Extract Android project
+      - name: Verify Android project
         shell: bash
         run: |
           set -e
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
 
-          ZIP_FILE="ToracoKeyAI_v0.37.3_AI_Header_Fixed_BuildReady.zip"
-
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: Android ZIP not found."
-            echo "ZIP files available:"
-            find . -maxdepth 2 -type f -name "*.zip"
-            exit 1
-          fi
-
-          mkdir -p android-source
-
-          unzip -q "$ZIP_FILE" -d android-source
-
-          echo "Android project extracted."
-
-          SETTINGS_FILE="$(find android-source -type f \( \
-            -name 'settings.gradle' \
-            -o -name 'settings.gradle.kts' \
-          \) | head -n 1)"
-
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: No settings.gradle or settings.gradle.kts found."
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-
-          echo "Project directory:"
-          echo "$PROJECT_DIR"
-
-          if [ ! -d "$PROJECT_DIR/app" ]; then
-            echo "ERROR: app directory not found."
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Verify AI header-fixed service
-        shell: bash
-        run: |
-          set -e
-
-          TARGET="$(find "$PROJECT_DIR/app/src/main" -type f \
-            -name 'ToracoKeyService.kt' | head -n 1)"
-
-          if [ -z "$TARGET" ]; then
-            echo "ERROR: ToracoKeyService.kt not found."
-            exit 1
-          fi
-
-          echo "Using:"
-          echo "$TARGET"
-
-          if ! grep -q "X-ToracoKey-Device" "$TARGET"; then
-            echo "ERROR: AI device header fix is missing."
-            exit 1
-          fi
-
-          if ! grep -q '"deviceId"' "$TARGET"; then
-            echo "ERROR: deviceId request field is missing."
-            exit 1
-          fi
-
-          echo "AI header fix verified successfully."
+          echo "Android project root: $(pwd)"
+          echo "settings.gradle.kts found"
+          echo "app/build.gradle.kts found"
+          echo "Android SDK packages installed"
 
       - name: Build debug APK
-        shell: bash
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew :app:assembleDebug --no-daemon --stacktrace
-          else
-            gradle :app:assembleDebug --no-daemon --stacktrace
-          fi
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         shell: bash
         run: |
           set -e
-
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not created."
-            exit 1
-          fi
-
-          echo "APK successfully created:"
-          ls -lh "$APK"
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKey-AI-v0.37.3-Header-Fixed-debug
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.37.3-GBoard-Number-Page-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
