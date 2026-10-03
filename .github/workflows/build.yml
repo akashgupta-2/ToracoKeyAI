@@ -26,8 +26,11 @@ jobs:
 
       - name: Prepare Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
@@ -42,12 +45,14 @@ jobs:
 
           echo "Searching for Android Gradle project..."
 
-          SETTINGS_FILE="$(find . -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -not -path './.git/*' | head -n 1)"
+          SETTINGS_FILE="$(find . -type f \( \
+            -name 'settings.gradle' \
+            -o -name 'settings.gradle.kts' \
+          \) -not -path './.git/*' | head -n 1)"
 
           if [ -z "$SETTINGS_FILE" ]; then
             echo "ERROR: No settings.gradle or settings.gradle.kts found."
-            echo "Repository contents:"
-            find . -maxdepth 3 -type f | sort
+            find . -maxdepth 4 -type f | sort
             exit 1
           fi
 
@@ -56,8 +61,9 @@ jobs:
           echo "Found settings file: $SETTINGS_FILE"
           echo "Android project directory: $PROJECT_DIR"
 
-          if [ ! -f "$PROJECT_DIR/build.gradle" ] && [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
-            echo "ERROR: No root build.gradle or build.gradle.kts found beside settings file."
+          if [ ! -f "$PROJECT_DIR/build.gradle" ] && \
+             [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
+            echo "ERROR: Root build.gradle or build.gradle.kts not found."
             exit 1
           fi
 
@@ -72,9 +78,11 @@ jobs:
         shell: bash
         run: |
           set -e
+
           cd "$PROJECT_DIR"
 
-          echo "Building from: $(pwd)"
+          echo "Building from:"
+          pwd
 
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
@@ -87,6 +95,7 @@ jobs:
         shell: bash
         run: |
           set -e
+
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
@@ -94,7 +103,7 @@ jobs:
             exit 1
           fi
 
-          echo "APK found: $APK"
+          echo "APK found:"
           ls -lh "$APK"
 
       - name: Upload APK
