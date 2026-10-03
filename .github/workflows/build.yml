@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.37.3
+name: Build ToracoKey AI
 
 on:
   workflow_dispatch:
@@ -22,45 +22,76 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         run: |
+          yes | sdkmanager --licenses || true
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
+      - name: Find Android project
+        shell: bash
+        run: |
+          echo "Searching for Android project..."
+          find . -maxdepth 4 \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -print
 
-      - name: Verify Android project
+      - name: Build APK
         shell: bash
         run: |
           set -e
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
 
-          echo "Android project root: $(pwd)"
-          echo "settings.gradle.kts found"
-          echo "app/build.gradle.kts found"
-          echo "Android SDK packages installed"
+          if [ -f "settings.gradle.kts" ]; then
+            echo "Found Android project in root"
+            PROJECT_DIR="."
+          elif [ -f "settings.gradle" ]; then
+            echo "Found Android project in root"
+            PROJECT_DIR="."
+          else
+            PROJECT_DIR=$(find . -maxdepth 4 -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -print -quit | xargs -r dirname)
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "ERROR: Android project not found"
+              exit 1
+            fi
+
+            echo "Found Android project at: $PROJECT_DIR"
+          fi
+
+          cd "$PROJECT_DIR"
+
+          echo "Project directory:"
+          pwd
+
+          echo "Project files:"
+          ls -la
+
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          else
+            echo "gradlew not found. Using installed Gradle."
+            gradle :app:assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Verify APK
         shell: bash
         run: |
-          set -e
-          test -f app/build/outputs/apk/debug/app-debug.apk
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          APK=$(find . -type f -path "*/build/outputs/apk/debug/*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated"
+            exit 1
+          fi
+
+          echo "APK found:"
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37.3-GBoard-Number-Page-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-GBoard-Number-Page-debug
+          path: '**/build/outputs/apk/debug/*.apk'
           if-no-files-found: error
