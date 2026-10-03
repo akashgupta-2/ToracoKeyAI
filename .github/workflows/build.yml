@@ -1,4 +1,4 @@
-name: Build ToracoKey AI
+name: Build ToracoKey AI v0.37.3 GBoard
 
 on:
   workflow_dispatch:
@@ -32,119 +32,45 @@ jobs:
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      - name: Prepare Android project
+      - name: Verify Android project
         shell: bash
         run: |
           set -e
 
-          echo "Checking repository..."
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
 
-          if [ -f "settings.gradle.kts" ] || [ -f "settings.gradle" ]; then
-            echo "Android project already exists in repository root."
-            exit 0
-          fi
+          echo "Android project found."
+          echo "GBoard number keyboard source found."
 
-          ZIP_FILE=$(find . -type f -iname "*.zip" -print -quit)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No Android project and no ZIP file found."
-            echo ""
-            echo "Repository contents:"
-            find . -maxdepth 4 -type f -print
-            exit 1
-          fi
-
-          echo "Found ZIP:"
-          echo "$ZIP_FILE"
-
-          mkdir -p extracted-project
-
-          echo "Extracting ZIP..."
-          unzip -q "$ZIP_FILE" -d extracted-project
-
-          echo "ZIP extracted successfully."
-
-          echo "Searching for Android project..."
-
-          SETTINGS_FILE=$(find extracted-project \
-            -type f \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            -print -quit)
-
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle/settings.gradle.kts not found inside ZIP."
-            echo ""
-            echo "Extracted files:"
-            find extracted-project -maxdepth 6 -type f -print
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-
-          echo "Android project found at:"
-          echo "$PROJECT_DIR"
-
-          echo "$PROJECT_DIR" > android_project_path.txt
-
-      - name: Build APK
+      - name: Build debug APK
         shell: bash
         run: |
           set -e
 
-          if [ -f "android_project_path.txt" ]; then
-            PROJECT_DIR=$(cat android_project_path.txt)
-          else
-            if [ -f "settings.gradle.kts" ]; then
-              PROJECT_DIR="."
-            elif [ -f "settings.gradle" ]; then
-              PROJECT_DIR="."
-            else
-              echo "ERROR: Android project path not found."
-              exit 1
-            fi
-          fi
-
-          echo "Building project:"
-          echo "$PROJECT_DIR"
-
-          cd "$PROJECT_DIR"
-
-          echo "Project contents:"
-          ls -la
-
-          if [ -f "gradlew" ]; then
-            echo "Using Gradle wrapper."
-            chmod +x gradlew
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
             ./gradlew :app:assembleDebug --no-daemon --stacktrace
           else
-            echo "Gradle wrapper not found."
-            echo "Using installed Gradle."
-
             gradle :app:assembleDebug --no-daemon --stacktrace
           fi
 
-      - name: Find APK
+      - name: Verify APK
         shell: bash
         run: |
           set -e
 
-          APK=$(find . -type f \
-            -path "*/build/outputs/apk/debug/*.apk" \
-            -print -quit)
+          test -f app/build/outputs/apk/debug/app-debug.apk
 
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          echo "APK generated successfully:"
-          ls -lh "$APK"
-
-          cp "$APK" ToracoKeyAI-debug.apk
+          echo "APK successfully built:"
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-GBoard-Number-Page-debug
-          path: ToracoKeyAI-debug.apk
+          name: ToracoKeyAI-v0.37.3-GBoard-Number-Page-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
