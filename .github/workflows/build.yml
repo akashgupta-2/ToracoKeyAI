@@ -16,7 +16,7 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. Checkout
+      # 1. Checkout repository
       # ============================================================
       - name: Checkout source
         uses: actions/checkout@v4
@@ -34,9 +34,6 @@ jobs:
 
       # ============================================================
       # 3. Android SDK
-      #
-      # IMPORTANT:
-      # Do NOT request the obsolete "tools" package.
       # ============================================================
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -45,7 +42,7 @@ jobs:
 
 
       # ============================================================
-      # 4. Install required Android SDK packages
+      # 4. Install Android SDK packages
       # ============================================================
       - name: Install Android SDK packages
         shell: bash
@@ -57,9 +54,7 @@ jobs:
 
 
       # ============================================================
-      # 5. Set up Gradle
-      #
-      # This project does NOT contain gradlew.
+      # 5. Gradle 8.11.1
       # ============================================================
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
@@ -69,39 +64,109 @@ jobs:
 
 
       # ============================================================
-      # 6. Verify exact project structure
+      # 6. Extract the EXACT Android project ZIP
       # ============================================================
-      - name: Verify Android project
+      - name: Extract Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="ToracoKeyAI_v0.37.3_NO_HOURLY_AUTH_FINAL.zip"
+
+          echo "======================================"
+          echo "CHECKING ANDROID PROJECT ZIP"
+          echo "======================================"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: Required ZIP file was not found:"
+            echo "$ZIP"
+            echo ""
+            echo "ZIP files currently in repository:"
+            find . -maxdepth 2 -type f -name "*.zip" -print
+            exit 1
+          fi
+
+          echo "Found:"
+          echo "$ZIP"
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          unzip -q "$ZIP" -d extracted
+
+          echo ""
+          echo "ZIP extracted successfully."
+
+
+      # ============================================================
+      # 7. Find Gradle project inside extracted ZIP
+      # ============================================================
+      - name: Locate Android project
         shell: bash
         run: |
           set -euo pipefail
 
           echo "======================================"
-          echo "VERIFYING TORACOKEY AI PROJECT"
+          echo "LOCATING ANDROID PROJECT"
           echo "======================================"
 
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f gradle.properties
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
+          SETTINGS_FILE=$(find extracted \
+            -type f \
+            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            -not -path "*/build/*" \
+            -print -quit)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: No Gradle settings file found."
+
+            echo ""
+            echo "Extracted files:"
+            find extracted -maxdepth 6 -type f | sort | head -300
+
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
 
           echo ""
-          echo "Project verified:"
-          pwd
+          echo "Android project found:"
+          echo "$PROJECT_DIR"
 
           echo ""
-          echo "Root files:"
-          ls -lah
+          echo "Checking required files..."
+
+          if [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
+            echo "ERROR: build.gradle.kts not found."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: app/build.gradle.kts not found."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml" ]; then
+            echo "ERROR: AndroidManifest.xml not found."
+            exit 1
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "ANDROID PROJECT VERIFIED"
+          echo "======================================"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
 
       # ============================================================
-      # 7. Build APK
+      # 8. Build debug APK
       # ============================================================
       - name: Build debug APK
         shell: bash
         run: |
           set -euo pipefail
+
+          cd "$PROJECT_DIR"
 
           echo "======================================"
           echo "BUILDING TORACOKEY AI"
@@ -113,20 +178,25 @@ jobs:
 
 
       # ============================================================
-      # 8. Verify APK
+      # 9. Verify APK
       # ============================================================
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
 
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not created."
+
             echo ""
-            echo "Build files:"
-            find app/build -type f 2>/dev/null | sort || true
+            echo "Build output:"
+            find "$PROJECT_DIR/app/build" \
+              -type f \
+              | sort \
+              | head -200 || true
+
             exit 1
           fi
 
@@ -138,11 +208,11 @@ jobs:
 
 
       # ============================================================
-      # 9. Upload APK
+      # 10. Upload APK
       # ============================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-v0.37.3-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
