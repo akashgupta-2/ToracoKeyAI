@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.37.3
+name: Build ToracoKey AI v0.37.3 - Never Empty Suggestions
 
 on:
   workflow_dispatch:
@@ -55,6 +55,8 @@ jobs:
 
       # ============================================================
       # 5. Gradle 8.11.1
+      #
+      # The project does not contain gradlew.
       # ============================================================
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
@@ -64,24 +66,24 @@ jobs:
 
 
       # ============================================================
-      # 6. Extract the EXACT Android project ZIP
+      # 6. Extract the EXACT project ZIP
       # ============================================================
       - name: Extract Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="ToracoKeyAI_v0.37.3_NO_HOURLY_AUTH_FINAL.zip"
+          ZIP="ToracoKeyAI_v0.37.3_NEVER_EMPTY_SUGGESTIONS.zip"
 
           echo "======================================"
-          echo "CHECKING ANDROID PROJECT ZIP"
+          echo "CHECKING PROJECT ZIP"
           echo "======================================"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: Required ZIP file was not found:"
+            echo "ERROR: ZIP file not found:"
             echo "$ZIP"
             echo ""
-            echo "ZIP files currently in repository:"
+            echo "Available ZIP files:"
             find . -maxdepth 2 -type f -name "*.zip" -print
             exit 1
           fi
@@ -94,12 +96,11 @@ jobs:
 
           unzip -q "$ZIP" -d extracted
 
-          echo ""
           echo "ZIP extracted successfully."
 
 
       # ============================================================
-      # 7. Find Gradle project inside extracted ZIP
+      # 7. Locate Android project inside ZIP
       # ============================================================
       - name: Locate Android project
         shell: bash
@@ -132,23 +133,10 @@ jobs:
           echo "Android project found:"
           echo "$PROJECT_DIR"
 
-          echo ""
-          echo "Checking required files..."
-
-          if [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
-            echo "ERROR: build.gradle.kts not found."
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "ERROR: app/build.gradle.kts not found."
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml" ]; then
-            echo "ERROR: AndroidManifest.xml not found."
-            exit 1
-          fi
+          # Verify required files
+          test -f "$PROJECT_DIR/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
 
           echo ""
           echo "======================================"
@@ -187,6 +175,10 @@ jobs:
 
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
+          echo "======================================"
+          echo "VERIFYING APK"
+          echo "======================================"
+
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not created."
 
@@ -200,9 +192,9 @@ jobs:
             exit 1
           fi
 
-          echo "======================================"
+          echo ""
           echo "APK BUILD SUCCESSFUL"
-          echo "======================================"
+          echo ""
 
           ls -lh "$APK"
 
@@ -210,9 +202,9 @@ jobs:
       # ============================================================
       # 10. Upload APK
       # ============================================================
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37.3-debug
+          name: ToracoKeyAI-v0.37.3-Never-Empty-Suggestions
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
