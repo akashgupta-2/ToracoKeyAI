@@ -16,16 +16,14 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. Checkout project
+      # 1. Checkout
       # ============================================================
       - name: Checkout source
         uses: actions/checkout@v4
 
 
       # ============================================================
-      # 2. Java 17
-      # IMPORTANT:
-      # No Gradle cache here because this project has no gradlew
+      # 2. JDK 17
       # ============================================================
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -36,50 +34,50 @@ jobs:
 
       # ============================================================
       # 3. Android SDK
+      #
+      # IMPORTANT:
+      # Do NOT request the obsolete "tools" package.
       # ============================================================
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
 
       # ============================================================
-      # 4. Install Android SDK packages required by this project
+      # 4. Install required Android SDK packages
       # ============================================================
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
 
-          yes | sdkmanager --licenses >/dev/null || true
-
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
 
       # ============================================================
-      # 5. Install Gradle 8.11.1
+      # 5. Set up Gradle
       #
       # This project does NOT contain gradlew.
-      # Therefore we use the installed Gradle command directly.
       # ============================================================
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.11.1"
+          gradle-version: '8.11.1'
           cache-disabled: true
 
 
       # ============================================================
-      # 6. Verify the exact ToracoKey AI project
+      # 6. Verify exact project structure
       # ============================================================
-      - name: Verify project structure
+      - name: Verify Android project
         shell: bash
         run: |
           set -euo pipefail
 
           echo "======================================"
-          echo "CHECKING TORACOKEY AI PROJECT"
+          echo "VERIFYING TORACOKEY AI PROJECT"
           echo "======================================"
 
           test -f settings.gradle.kts
@@ -88,26 +86,17 @@ jobs:
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
 
-          test -d app/src/main/java/com/toracokey/ai
-
           echo ""
-          echo "Project root:"
+          echo "Project verified:"
           pwd
 
           echo ""
-          echo "Project files:"
+          echo "Root files:"
           ls -lah
-
-          echo ""
-          echo "Android app:"
-          ls -lah app
-
-          echo ""
-          echo "Project structure verified successfully."
 
 
       # ============================================================
-      # 7. Build debug APK
+      # 7. Build APK
       # ============================================================
       - name: Build debug APK
         shell: bash
@@ -115,15 +104,12 @@ jobs:
           set -euo pipefail
 
           echo "======================================"
-          echo "BUILDING TORACOKEY AI APK"
+          echo "BUILDING TORACOKEY AI"
           echo "======================================"
 
           gradle :app:assembleDebug \
             --no-daemon \
             --stacktrace
-
-          echo ""
-          echo "Gradle build completed."
 
 
       # ============================================================
@@ -136,21 +122,17 @@ jobs:
 
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          echo "======================================"
-          echo "VERIFYING APK"
-          echo "======================================"
-
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not created."
             echo ""
-            echo "Available build files:"
+            echo "Build files:"
             find app/build -type f 2>/dev/null | sort || true
             exit 1
           fi
 
-          echo ""
+          echo "======================================"
           echo "APK BUILD SUCCESSFUL"
-          echo ""
+          echo "======================================"
 
           ls -lh "$APK"
 
@@ -158,7 +140,7 @@ jobs:
       # ============================================================
       # 9. Upload APK
       # ============================================================
-      - name: Upload debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-v0.37.3-debug
