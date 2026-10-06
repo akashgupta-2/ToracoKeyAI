@@ -1,13 +1,10 @@
-name: Build ToracoKey AI v0.37.8
+name: Build ToracoKey AI
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-
-permissions:
-  contents: read
 
 jobs:
   build:
@@ -26,88 +23,107 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android SDK
-        shell: bash
+      - name: Install Android SDK packages
         run: |
-          set -e
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
-          yes | sdkmanager --licenses >/dev/null || true
-
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Set up Gradle
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Find Android project
+      - name: Extract latest ToracoKey project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          PROJECT_DIR=""
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'ToracoKeyAI_v*.zip' | sort -V | tail -n 1)"
 
-          if [ -f "settings.gradle.kts" ] && [ -f "app/build.gradle.kts" ]; then
-            PROJECT_DIR="."
-          else
-            FOUND="$(find . -type f -name "settings.gradle.kts" -print -quit)"
-
-            if [ -n "$FOUND" ]; then
-              PROJECT_DIR="$(dirname "$FOUND")"
-            fi
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android Gradle project not found."
-            echo "Repository contents:"
-            find . -maxdepth 4 -type f | sort
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ToracoKeyAI_v*.zip file found."
             exit 1
           fi
 
-          PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+          echo "Using project ZIP:"
+          echo "$ZIP_FILE"
+
+          rm -rf "$GITHUB_WORKSPACE/toracokey-project"
+          mkdir -p "$GITHUB_WORKSPACE/toracokey-project"
+
+          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/toracokey-project"
+
+          echo "Extracted files:"
+          find "$GITHUB_WORKSPACE/toracokey-project" \
+            -maxdepth 4 \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -print
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROJECT_DIR="$(find "$GITHUB_WORKSPACE/toracokey-project" \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -not -path "*/.git/*" \
+            -print -quit | xargs -r dirname)"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android project was not found inside the ToracoKey ZIP."
+            echo ""
+            echo "Extracted directory:"
+            find "$GITHUB_WORKSPACE/toracokey-project" -maxdepth 4 -type f | head -200
+            exit 1
+          fi
 
           echo "Android project found at:"
           echo "$PROJECT_DIR"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Show project files
+      - name: Verify Android project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          cd "$PROJECT_DIR"
+          test -f "$PROJECT_DIR/settings.gradle.kts" \
+            || test -f "$PROJECT_DIR/settings.gradle"
 
-          echo "Project directory:"
-          pwd
+          test -f "$PROJECT_DIR/app/build.gradle.kts" \
+            || test -f "$PROJECT_DIR/app/build.gradle"
 
-          echo
+          echo "Android project structure is valid."
+
+          echo ""
           echo "Project files:"
-          find . -maxdepth 3 -type f | sort
+          find "$PROJECT_DIR" -maxdepth 3 -type f \
+            -not -path "*/.git/*" \
+            | sort
 
-      - name: Check suggestion dictionary
+      - name: Verify local suggestion dictionary
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          cd "$PROJECT_DIR"
+          DICT="$PROJECT_DIR/app/src/main/assets/toracokey_words.tsv.gz"
 
-          if [ -f "app/src/main/assets/toracokey_words.tsv.gz" ]; then
-            echo "Suggestion dictionary found."
-            ls -lh "app/src/main/assets/toracokey_words.tsv.gz"
+          if [ -f "$DICT" ]; then
+            echo "Suggestion dictionary found:"
+            echo "$DICT"
+            ls -lh "$DICT"
           else
-            echo "WARNING: suggestion dictionary not found."
-            echo "Continuing because the Android project may use another suggestion source."
+            echo "WARNING: Suggestion dictionary not found."
           fi
 
-      - name: Build Debug APK
+      - name: Build debug APK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           cd "$PROJECT_DIR"
 
@@ -118,24 +134,21 @@ jobs:
       - name: Verify APK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          cd "$PROJECT_DIR"
-
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not created."
-            find app/build -type f | sort || true
+            echo "ERROR: Debug APK was not created."
             exit 1
           fi
 
           echo "APK successfully created:"
           ls -lh "$APK"
 
-      - name: Upload Debug APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37.8-debug
+          name: ToracoKeyAI-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
