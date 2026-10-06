@@ -28,12 +28,8 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
-          set -e
-
           yes | sdkmanager --licenses || true
-
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
@@ -44,44 +40,57 @@ jobs:
           gradle-version: '8.11.1'
           cache-disabled: true
 
+      - name: Extract ToracoKey AI project
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE="ToracoKeyAI_v0.37.4_AUTH_VOICE_FIXED.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: $ZIP_FILE was not found."
+            echo ""
+            echo "Files in repository:"
+            ls -lah
+            exit 1
+          fi
+
+          echo "Found:"
+          ls -lh "$ZIP_FILE"
+
+          rm -rf toracokey-build
+          mkdir -p toracokey-build
+
+          echo "Extracting project..."
+
+          unzip -q "$ZIP_FILE" -d toracokey-build
+
+          echo ""
+          echo "Extracted files:"
+          find toracokey-build -maxdepth 3 -type f | sort | head -200
+
       - name: Find Android project
         shell: bash
         run: |
           set -e
 
-          echo "GitHub workspace:"
-          echo "$GITHUB_WORKSPACE"
-
-          echo ""
-          echo "Repository contents:"
-          find "$GITHUB_WORKSPACE" -maxdepth 4 -type f | sort | head -200
-
-          echo ""
-          echo "Searching for settings.gradle.kts..."
-
-          PROJECT_SETTINGS=$(find "$GITHUB_WORKSPACE" \
+          PROJECT_SETTINGS=$(find "$GITHUB_WORKSPACE/toracokey-build" \
             -type f \
             -name "settings.gradle.kts" \
             -print \
             -quit)
 
           if [ -z "$PROJECT_SETTINGS" ]; then
+            echo "ERROR: settings.gradle.kts was not found after extracting ZIP."
             echo ""
-            echo "ERROR: settings.gradle.kts was not found."
-            echo ""
-            echo "Your GitHub repository must contain the ToracoKey Android project."
-            echo "Expected files include:"
-            echo "  settings.gradle.kts"
-            echo "  build.gradle.kts"
-            echo "  app/build.gradle.kts"
-            echo ""
+            echo "ZIP contents:"
+            find "$GITHUB_WORKSPACE/toracokey-build" -maxdepth 5 -type f | sort
             exit 1
           fi
 
           PROJECT_ROOT=$(dirname "$PROJECT_SETTINGS")
 
-          echo ""
-          echo "Android project found at:"
+          echo "Android project found:"
           echo "$PROJECT_ROOT"
 
           echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
@@ -91,8 +100,7 @@ jobs:
         run: |
           set -e
 
-          echo "Checking:"
-          echo "$PROJECT_ROOT"
+          echo "Checking Android project..."
 
           test -f "$PROJECT_ROOT/settings.gradle.kts"
           test -f "$PROJECT_ROOT/build.gradle.kts"
@@ -102,23 +110,17 @@ jobs:
           echo ""
           echo "Android project structure OK."
 
-          echo ""
-          echo "Project files:"
-          find "$PROJECT_ROOT/app/src/main" -maxdepth 4 -type f | sort
-
       - name: Check suggestion dictionary
         shell: bash
         run: |
-          set -e
-
           DICTIONARY="$PROJECT_ROOT/app/src/main/assets/toracokey_words.tsv.gz"
 
           if [ -f "$DICTIONARY" ]; then
             echo "Suggestion dictionary found:"
             ls -lh "$DICTIONARY"
           else
-            echo "WARNING: Suggestion dictionary was not found."
-            echo "The APK build will continue."
+            echo "WARNING: Suggestion dictionary not found."
+            echo "Continuing with build..."
           fi
 
       - name: Build Debug APK
@@ -129,7 +131,7 @@ jobs:
           cd "$PROJECT_ROOT"
 
           echo "Building ToracoKey AI..."
-          echo "Project directory:"
+          echo "Project:"
           pwd
 
           gradle :app:assembleDebug \
@@ -149,7 +151,10 @@ jobs:
           fi
 
           echo ""
-          echo "APK successfully created:"
+          echo "======================================"
+          echo "APK BUILD SUCCESSFUL"
+          echo "======================================"
+          echo ""
           ls -lh "$APK"
 
       - name: Upload Debug APK
