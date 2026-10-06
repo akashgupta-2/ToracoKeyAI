@@ -7,6 +7,9 @@ on:
       - main
       - master
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,7 +18,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -25,39 +28,133 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
+          set -e
+
           yes | sdkmanager --licenses || true
+
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Verify project structure
+      - name: Find Android project
+        shell: bash
         run: |
-          echo "Checking ToracoKey AI project..."
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
-          test -f app/src/main/assets/toracokey_words.tsv.gz
-          echo "Project structure OK"
+          set -e
+
+          echo "GitHub workspace:"
+          echo "$GITHUB_WORKSPACE"
+
+          echo ""
+          echo "Repository contents:"
+          find "$GITHUB_WORKSPACE" -maxdepth 4 -type f | sort | head -200
+
+          echo ""
+          echo "Searching for settings.gradle.kts..."
+
+          PROJECT_SETTINGS=$(find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name "settings.gradle.kts" \
+            -print \
+            -quit)
+
+          if [ -z "$PROJECT_SETTINGS" ]; then
+            echo ""
+            echo "ERROR: settings.gradle.kts was not found."
+            echo ""
+            echo "Your GitHub repository must contain the ToracoKey Android project."
+            echo "Expected files include:"
+            echo "  settings.gradle.kts"
+            echo "  build.gradle.kts"
+            echo "  app/build.gradle.kts"
+            echo ""
+            exit 1
+          fi
+
+          PROJECT_ROOT=$(dirname "$PROJECT_SETTINGS")
+
+          echo ""
+          echo "Android project found at:"
+          echo "$PROJECT_ROOT"
+
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+
+      - name: Verify Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking:"
+          echo "$PROJECT_ROOT"
+
+          test -f "$PROJECT_ROOT/settings.gradle.kts"
+          test -f "$PROJECT_ROOT/build.gradle.kts"
+          test -f "$PROJECT_ROOT/app/build.gradle.kts"
+          test -f "$PROJECT_ROOT/app/src/main/AndroidManifest.xml"
+
+          echo ""
+          echo "Android project structure OK."
+
+          echo ""
+          echo "Project files:"
+          find "$PROJECT_ROOT/app/src/main" -maxdepth 4 -type f | sort
+
+      - name: Check suggestion dictionary
+        shell: bash
+        run: |
+          set -e
+
+          DICTIONARY="$PROJECT_ROOT/app/src/main/assets/toracokey_words.tsv.gz"
+
+          if [ -f "$DICTIONARY" ]; then
+            echo "Suggestion dictionary found:"
+            ls -lh "$DICTIONARY"
+          else
+            echo "WARNING: Suggestion dictionary was not found."
+            echo "The APK build will continue."
+          fi
 
       - name: Build Debug APK
+        shell: bash
         run: |
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          set -e
 
-      - name: Find APK
+          cd "$PROJECT_ROOT"
+
+          echo "Building ToracoKey AI..."
+          echo "Project directory:"
+          pwd
+
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Verify APK
+        shell: bash
         run: |
-          find app/build/outputs/apk -type f -name "*.apk" -print
+          set -e
+
+          APK="$PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not created."
+            exit 1
+          fi
+
+          echo ""
+          echo "APK successfully created:"
+          ls -lh "$APK"
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-v0.37.4-Auth-Voice-Fixed-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
