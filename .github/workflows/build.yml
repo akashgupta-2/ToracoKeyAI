@@ -1,11 +1,10 @@
-name: Build ToracoKey AI v0.37.6 - Clean Compact Suggestions Voice
+name: Build ToracoKey AI v0.37.8 - Clean Suggestions
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      - master
 
 permissions:
   contents: read
@@ -22,183 +21,62 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         shell: bash
         run: |
-          set -e
-
-          yes | sdkmanager --licenses || true
-
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          set -euo pipefail
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.11.1"
+          gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Find v0.37.6 ZIP
+      - name: Verify ToracoKey AI project structure
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f gradle.properties
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          test -d app/src/main/java/com/toracokey/ai
+          echo "Project root: $(pwd)"
+          echo "Gradle project files found."
 
-          ZIP_FILE="ToracoKeyAI_v0.37.6_CLEAN_COMPACT_SUGGESTIONS_VOICE.zip"
-
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: Project ZIP not found:"
-            echo "$ZIP_FILE"
-            echo ""
-            echo "Files in repository:"
-            find . -maxdepth 2 -type f -print | sort
-            exit 1
-          fi
-
-          echo "Found project ZIP:"
-          ls -lh "$ZIP_FILE"
-
-          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-
-      - name: Extract v0.37.6 project
+      - name: Verify local suggestion dictionary
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          test -s app/src/main/assets/toracokey_words.tsv.gz
+          ls -lh app/src/main/assets/toracokey_words.tsv.gz
 
-          rm -rf toracokey-build
-          mkdir -p toracokey-build
-
-          unzip -q "$ZIP_FILE" -d toracokey-build
-
-          echo "Project extracted."
-
-          find toracokey-build -maxdepth 4 -type f -print | sort | head -250
-
-      - name: Find Android project
+      - name: Build debug APK
         shell: bash
         run: |
-          set -e
-
-          SETTINGS_FILE=$(find "$GITHUB_WORKSPACE/toracokey-build" \
-            -type f \
-            -name "settings.gradle.kts" \
-            -print \
-            -quit)
-
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle.kts not found."
-            echo ""
-            echo "Extracted files:"
-            find "$GITHUB_WORKSPACE/toracokey-build" \
-              -type f \
-              -print | sort
-            exit 1
-          fi
-
-          PROJECT_ROOT=$(dirname "$SETTINGS_FILE")
-
-          echo "Android project:"
-          echo "$PROJECT_ROOT"
-
-          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-
-      - name: Verify project
-        shell: bash
-        run: |
-          set -e
-
-          test -f "$PROJECT_ROOT/settings.gradle.kts"
-          test -f "$PROJECT_ROOT/build.gradle.kts"
-          test -f "$PROJECT_ROOT/app/build.gradle.kts"
-          test -f "$PROJECT_ROOT/app/src/main/AndroidManifest.xml"
-
-          echo "Android project structure OK."
-
-      - name: Verify clean project
-        shell: bash
-        run: |
-          set -e
-
-          echo "Checking for unwanted files..."
-
-          BAD_FILES=$(find "$PROJECT_ROOT" -type f \
-            \( \
-              -name "*.apk" \
-              -o -name "*.aab" \
-              -o -name "*.zip" \
-              -o -name "*.log" \
-              -o -name ".DS_Store" \
-              -o -name "Thumbs.db" \
-            \) \
-            -print)
-
-          if [ -n "$BAD_FILES" ]; then
-            echo "ERROR: Unwanted files found:"
-            echo "$BAD_FILES"
-            exit 1
-          fi
-
-          echo "Project is clean."
-
-      - name: Verify suggestion dictionary
-        shell: bash
-        run: |
-          set -e
-
-          DICTIONARY="$PROJECT_ROOT/app/src/main/assets/toracokey_words.tsv.gz"
-
-          if [ ! -f "$DICTIONARY" ]; then
-            echo "ERROR: Suggestion dictionary missing:"
-            echo "$DICTIONARY"
-            exit 1
-          fi
-
-          echo "Suggestion dictionary:"
-          ls -lh "$DICTIONARY"
-
-      - name: Build Debug APK
-        shell: bash
-        run: |
-          set -e
-
-          cd "$PROJECT_ROOT"
-
-          echo "=========================================="
-          echo "ToracoKey AI v0.37.6"
-          echo "Clean Compact Suggestions + Voice"
-          echo "=========================================="
-
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
+          set -euo pipefail
+          gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
-          APK="$PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not created."
-            exit 1
-          fi
-
-          echo "=========================================="
-          echo "BUILD SUCCESSFUL"
-          echo "=========================================="
-
-          ls -lh "$APK"
-
-      - name: Upload Debug APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37.6-Clean-Compact-Suggestions-Voice-debug
-          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.37.8-Clean-Suggestions-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
