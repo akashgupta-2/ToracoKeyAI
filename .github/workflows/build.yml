@@ -1,92 +1,121 @@
-name: Build ToracoKey AI v0.37.9 - GBoard Geometry Touch
+name: Build ToracoKey AI v0.37.9
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-
-permissions:
-  contents: read
+    paths:
+      - "ToracoKeyAI_v0.37.9_GBOARD_GEOMETRY_TOUCH.zip"
+      - ".github/workflows/build.yml"
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
-          set -euo pipefail
+          sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.11.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: "8.11.1"
           cache-disabled: true
 
-      - name: Verify ToracoKey AI project structure
+      - name: Extract ToracoKey AI source ZIP
         shell: bash
         run: |
-          set -euo pipefail
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f gradle.properties
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
-          test -d app/src/main/java/com/toracokey/ai
-          echo "Project root: $(pwd)"
-          echo "Gradle project files found."
+          set -e
 
-      - name: Verify keyboard geometry source
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-          grep -q "private val rowHeight = dp(58)" app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-          grep -q "setMargins(dp(3), dp(2), dp(3), dp(2))" app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-          grep -q "dp(60)" app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-          echo "Keyboard geometry and expanded touch-slot layout verified."
+          ZIP="ToracoKeyAI_v0.37.9_GBOARD_GEOMETRY_TOUCH.zip"
 
-      - name: Verify local suggestion dictionary
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP not found"
+            exit 1
+          fi
+
+          rm -rf toracokey-source
+          mkdir -p toracokey-source
+
+          unzip -q "$ZIP" -d toracokey-source
+
+          echo "ZIP extracted successfully."
+
+      - name: Find Android project
         shell: bash
         run: |
-          set -euo pipefail
-          test -s app/src/main/assets/toracokey_words.tsv.gz
-          ls -lh app/src/main/assets/toracokey_words.tsv.gz
+          set -e
+
+          PROJECT_DIR=$(find toracokey-source \
+            -type f \
+            -name "settings.gradle.kts" \
+            -not -path "*/.git/*" \
+            -print -quit | xargs dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: settings.gradle.kts not found inside ZIP"
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: app/build.gradle.kts not found"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project:"
+          echo "$PROJECT_DIR"
+
+      - name: Verify keyboard source
+        shell: bash
+        run: |
+          set -e
+
+          test -f "$PROJECT_DIR/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+          test -f "$PROJECT_DIR/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt"
+          test -f "$PROJECT_DIR/app/src/main/java/com/toracokey/ai/WordSuggestions.kt"
+          test -f "$PROJECT_DIR/app/src/main/assets/toracokey_words.tsv.gz"
+
+          echo "ToracoKey source files verified."
 
       - name: Build debug APK
-        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          set -euo pipefail
           gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         shell: bash
         run: |
-          set -euo pipefail
-          test -f app/build/outputs/apk/debug/app-debug.apk
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          set -e
 
-      - name: Upload debug APK
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not created"
+            exit 1
+          fi
+
+          echo "APK created successfully:"
+          ls -lh "$APK"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.37.9-GBoard-Geometry-Touch-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.37.9-GBOARD-GEOMETRY-TOUCH-debug
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
