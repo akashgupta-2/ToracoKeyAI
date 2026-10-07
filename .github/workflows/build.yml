@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.38.1 - GBoard Geometry Color Suggestions
+name: Build ToracoKey AI v0.38.1
 
 on:
   workflow_dispatch:
@@ -13,8 +13,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ZIP_NAME: ToracoKeyAI_v0.38.1_GBOARD_GEOMETRY_BLACK_THEME_UNIQUE_SUGGESTIONS.zip
+      PROJECT_DIR: toracokey-source
+
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -32,6 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
@@ -41,102 +46,136 @@ jobs:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Verify ToracoKey AI project structure
+      - name: Verify ZIP
         shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f "$ZIP_NAME"
+
+          echo "Found source ZIP:"
+          ls -lh "$ZIP_NAME"
+
+      - name: Extract ToracoKey AI source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "$PROJECT_DIR"
+          mkdir -p "$PROJECT_DIR"
+
+          unzip -q "$ZIP_NAME" -d "$PROJECT_DIR"
+
+          echo "Extracted project:"
+          find "$PROJECT_DIR" -maxdepth 3 -type f | sort | head -100
+
+      - name: Verify Android project
+        shell: bash
+        working-directory: toracokey-source
         run: |
           set -euo pipefail
 
           test -f settings.gradle.kts
           test -f build.gradle.kts
           test -f gradle.properties
+          test -f README.md
+
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
 
-          test -d app/src/main/java/com/toracokey/ai
           test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
           test -f app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
           test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
 
-          echo "Project root: $(pwd)"
-          echo "Gradle project files found."
+          test -s app/src/main/assets/toracokey_words.tsv.gz
 
-      - name: Verify v0.38.1 keyboard geometry
+          echo "Android project structure verified."
+
+      - name: Verify v0.38.1 configuration
         shell: bash
+        working-directory: toracokey-source
         run: |
           set -euo pipefail
 
-          grep -q "private val rowHeight = dp(56)" \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          grep -Fq 'versionCode = 47' app/build.gradle.kts
+          grep -Fq 'versionName = "0.38.1"' app/build.gradle.kts
+          grep -Fq 'compileSdk = 35' app/build.gradle.kts
+          grep -Fq 'targetSdk = 35' app/build.gradle.kts
 
-          grep -q "setMargins(dp(3), dp(2), dp(3), dp(2))" \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          echo "v0.38.1 / versionCode 47 configuration verified."
 
-          grep -q "dp(38)" \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -q "setColors(colors)" \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          echo "v0.38.1 keyboard geometry verified."
-
-      - name: Verify GBoard-like black theme
+      - name: Verify GBoard-like keyboard source
         shell: bash
+        working-directory: toracokey-source
         run: |
           set -euo pipefail
 
-          grep -q \
+          grep -Fq 'private val rowHeight = dp(56)' \
+            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+
+          grep -Fq 'dp(38)' \
+            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+
+          grep -Fq 'setMargins(dp(3), dp(2), dp(3), dp(2))' \
+            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+
+          grep -Fq 'setColors(colors)' \
+            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+
+          echo "Keyboard geometry and touch-slot source verified."
+
+      - name: Verify black theme
+        shell: bash
+        working-directory: toracokey-source
+        run: |
+          set -euo pipefail
+
+          grep -Fq \
             'android:windowBackground">@android:color/black' \
             app/src/main/res/values/styles.xml
 
-          grep -q \
+          grep -Fq \
             'android:navigationBarColor">@android:color/black' \
             app/src/main/res/values/styles.xml
 
-          echo "Black keyboard/window theme verified."
+          echo "Black theme configuration verified."
 
       - name: Verify unique suggestions
         shell: bash
+        working-directory: toracokey-source
         run: |
           set -euo pipefail
 
-          grep -q \
-            "distinctBy { it.lowercase(Locale.ROOT) }" \
+          grep -Fq \
+            'distinctBy { it.lowercase(Locale.ROOT) }' \
             app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
 
-          test -s app/src/main/assets/toracokey_words.tsv.gz
-
-          echo "Suggestion dictionary and duplicate filtering verified."
-
-      - name: Verify version
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          grep -q 'versionCode = 47' app/build.gradle.kts
-          grep -q 'versionName = "0.38.1"' app/build.gradle.kts
-
-          echo "ToracoKey AI v0.38.1 / versionCode 47 verified."
+          echo "Non-repeating suggestion filtering verified."
 
       - name: Build debug APK
         shell: bash
+        working-directory: toracokey-source
         run: |
           set -euo pipefail
-          gradle :app:assembleDebug --no-daemon --stacktrace
+
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
 
       - name: Verify APK
         shell: bash
+        working-directory: toracokey-source
         run: |
           set -euo pipefail
 
           test -f app/build/outputs/apk/debug/app-debug.apk
 
+          echo "APK successfully created:"
           ls -lh app/build/outputs/apk/debug/app-debug.apk
-
-          echo "APK verification successful."
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.1-GBoard-Geometry-Color-Suggestions-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.38.1-debug
+          path: toracokey-source/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
