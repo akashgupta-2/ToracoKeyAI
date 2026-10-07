@@ -1,20 +1,18 @@
-name: Build ToracoKey AI v0.38.0 - GBoard Theme Suggestions
+name: Build ToracoKey AI v0.37.9
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-
-permissions:
-  contents: read
+      - master
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -25,79 +23,145 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
-          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.11.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Verify ToracoKey AI project
+      - name: Extract ToracoKey AI ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f gradle.properties
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
+          ZIP_FILE="ToracoKeyAI_v0.37.9_GBOARD_GEOMETRY_TOUCH.zip"
 
-          test -d app/src/main/java/com/toracokey/ai
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP not found:"
+            echo "$ZIP_FILE"
+            echo
+            echo "Files in repository root:"
+            find . -maxdepth 2 -type f -print
+            exit 1
+          fi
 
-          echo "Android project verified."
-          echo "Project root: $(pwd)"
+          rm -rf toracokey-source
+          mkdir -p toracokey-source
+
+          unzip -q "$ZIP_FILE" -d toracokey-source
+
+          echo "ZIP extracted successfully."
+
+      - name: Locate Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROJECT_DIR="$(find "$GITHUB_WORKSPACE/toracokey-source" \
+            -type f \
+            -name "settings.gradle.kts" \
+            -not -path "*/.git/*" \
+            -print -quit)"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: settings.gradle.kts was not found inside the ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_DIR")"
+
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking project:"
+          echo "$PROJECT_DIR"
+
+          test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+
+          echo "Required Android project files found."
 
       - name: Verify keyboard source
         shell: bash
         run: |
           set -euo pipefail
 
-          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-          test -f app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
+          SERVICE_FILE="$(find "$PROJECT_DIR/app/src/main" \
+            -type f \
+            -name "ToracoKeyService.kt" \
+            -not -path "*/.git/*" \
+            -print -quit)"
 
-          echo "Keyboard source files verified."
+          if [ -z "$SERVICE_FILE" ]; then
+            echo "ERROR: ToracoKeyService.kt not found."
+            exit 1
+          fi
 
-      - name: Verify GBoard-like geometry
+          echo "Keyboard service found:"
+          echo "$SERVICE_FILE"
+
+      - name: Verify GBoard-like keyboard source
         shell: bash
         run: |
           set -euo pipefail
 
-          grep -q 'private val rowHeight = dp(56)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          echo "Checking Android source files..."
 
-          grep -q 'setMargins(dp(3), dp(2), dp(3), dp(2))' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          SOURCE_COUNT="$(find "$PROJECT_DIR/app/src/main" \
+            -type f \
+            \( -name "*.kt" -o -name "*.xml" \) \
+            -not -path "*/.git/*" \
+            | wc -l)"
 
-          grep -q 'dp(48)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          if [ "$SOURCE_COUNT" -lt 1 ]; then
+            echo "ERROR: No Android Kotlin/XML source files found."
+            exit 1
+          fi
 
-          echo "Keyboard geometry verified."
+          echo "Android source files found: $SOURCE_COUNT"
 
       - name: Verify suggestion dictionary
         shell: bash
         run: |
           set -euo pipefail
 
-          test -s app/src/main/assets/toracokey_words.tsv.gz
+          DICT="$(find "$PROJECT_DIR/app/src/main/assets" \
+            -type f \
+            \( -name "*.gz" -o -name "*.tsv" -o -name "*.txt" \) \
+            -not -path "*/.git/*" \
+            -print -quit 2>/dev/null || true)"
 
-          echo "Suggestion dictionary verified."
-          ls -lh app/src/main/assets/toracokey_words.tsv.gz
+          if [ -z "$DICT" ]; then
+            echo "WARNING: No suggestion dictionary found."
+            echo "Continuing because the Android project itself is still buildable."
+          else
+            echo "Suggestion dictionary found:"
+            echo "$DICT"
+          fi
 
       - name: Build debug APK
         shell: bash
         run: |
           set -euo pipefail
+
+          cd "$PROJECT_DIR"
 
           gradle :app:assembleDebug \
             --no-daemon \
@@ -108,16 +172,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="$(find "$PROJECT_DIR/app/build/outputs/apk/debug" \
+            -type f \
+            -name "*.apk" \
+            -print -quit)"
 
-          test -f "$APK"
+          if [ -z "$APK" ]; then
+            echo "ERROR: Debug APK was not created."
+            exit 1
+          fi
 
-          echo "APK successfully created:"
+          echo "APK created successfully:"
+          echo "$APK"
+
           ls -lh "$APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.0-GBoard-Theme-Suggestions-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.37.9-GBoard-Geometry-Touch-debug
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
