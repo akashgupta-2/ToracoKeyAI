@@ -1,4 +1,4 @@
-name: Build ToracoKey AI - Dimensions Final
+name: Build ToracoKey AI - Dimensions Only
 
 on:
   workflow_dispatch:
@@ -15,31 +15,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ------------------------------------------------------------
-      # 1. Checkout repository
-      # ------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------
-      # 2. Java 17
-      # ------------------------------------------------------------
+      - name: Show repository structure
+        shell: bash
+        run: |
+          set -e
+          echo "Repository:"
+          pwd
+          echo
+          echo "Files:"
+          find . -maxdepth 3 -type f -print | sort | head -300
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      # ------------------------------------------------------------
-      # 3. Android SDK
-      # ------------------------------------------------------------
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
           yes | sdkmanager --licenses >/dev/null || true
 
@@ -48,211 +49,112 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      # ------------------------------------------------------------
-      # 4. Gradle
-      # ------------------------------------------------------------
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
           cache-disabled: true
 
-      # ------------------------------------------------------------
-      # 5. Show repository contents
-      # ------------------------------------------------------------
-      - name: Show repository structure
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "REPOSITORY CONTENTS"
-          echo "=========================================="
-
-          find "$GITHUB_WORKSPACE" \
-            -maxdepth 3 \
-            -type f \
-            -print \
-            | sort
-
-          echo
-          echo "=========================================="
-          echo "ZIP FILES"
-          echo "=========================================="
-
-          find "$GITHUB_WORKSPACE" \
-            -type f \
-            \( -iname "*.zip" -o -iname "*.ZIP" \) \
-            -print \
-            | sort || true
-
-      # ------------------------------------------------------------
-      # 6. Extract the dimensions ZIP
-      #
-      # Expected ZIP:
-      # ToracoKeyAI_v0.38.7_DIMENSIONS_FINAL.zip
-      # ------------------------------------------------------------
       - name: Extract ToracoKey AI project
-        id: extract
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
-          echo "Searching for ToracoKey AI ZIP..."
+          echo "Looking for ToracoKey AI ZIP..."
 
-          ZIP=""
+          ZIP_FILE="$(find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -iname '*.zip' | head -n 1)"
 
-          while IFS= read -r -d '' FILE; do
-            NAME="$(basename "$FILE")"
-
-            case "$NAME" in
-              ToracoKeyAI_v0.38.7_DIMENSIONS_FINAL.zip)
-                ZIP="$FILE"
-                break
-                ;;
-            esac
-          done < <(
-            find "$GITHUB_WORKSPACE" \
-              -type f \
-              -iname "*.zip" \
-              -print0
-          )
-
-          if [ -z "$ZIP" ]; then
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found."
             echo
-            echo "ERROR: ToracoKeyAI_v0.38.7_DIMENSIONS_FINAL.zip was not found."
-            echo
-            echo "ZIP files found:"
-            find "$GITHUB_WORKSPACE" \
-              -type f \
-              -iname "*.zip" \
-              -print || true
+            find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -print | sort
             exit 1
           fi
 
-          echo
-          echo "Using ZIP:"
-          echo "$ZIP"
-          echo
+          echo "ZIP found:"
+          echo "$ZIP_FILE"
 
           rm -rf "$GITHUB_WORKSPACE/extracted"
 
           mkdir -p "$GITHUB_WORKSPACE/extracted"
 
-          unzip -q "$ZIP" \
-            -d "$GITHUB_WORKSPACE/extracted"
+          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/extracted"
 
           echo
-          echo "ZIP extracted successfully."
+          echo "Extraction completed."
           echo
+          echo "Extracted structure:"
+          find "$GITHUB_WORKSPACE/extracted" -maxdepth 5 -type f -print | sort | head -500
 
-          echo "Extracted files:"
-          find "$GITHUB_WORKSPACE/extracted" \
-            -maxdepth 4 \
-            -type f \
-            -print \
-            | sort
-
-      # ------------------------------------------------------------
-      # 7. Locate Android Gradle project
-      #
-      # Supports:
-      # extracted/settings.gradle.kts
-      #
-      # or:
-      # extracted/some-folder/settings.gradle.kts
-      # ------------------------------------------------------------
       - name: Locate Android Gradle project
         id: locate
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
           ROOT="$GITHUB_WORKSPACE/extracted"
 
-          echo "Searching for Android Gradle project..."
+          echo "Searching inside:"
+          echo "$ROOT"
           echo
 
-          PROJECT=""
+          SETTINGS_FILE="$(find "$ROOT" -type f -name 'settings.gradle.kts' -print -quit)"
 
-          # Direct project
-          if [ \
-            -f "$ROOT/settings.gradle.kts" ] && \
-            [ -d "$ROOT/app" ] && \
-            [ -f "$ROOT/app/build.gradle.kts" ]
-          ]; then
-            PROJECT="$ROOT"
-          fi
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: settings.gradle.kts was not found."
 
-          # Nested project
-          if [ -z "$PROJECT" ]; then
-            while IFS= read -r -d '' SETTINGS; do
-
-              DIR="$(dirname "$SETTINGS")"
-
-              if [ \
-                -d "$DIR/app" ] && \
-                [ -f "$DIR/app/build.gradle.kts" ]
-              ]; then
-                PROJECT="$DIR"
-                break
-              fi
-
-            done < <(
-              find "$ROOT" \
-                -type f \
-                -name "settings.gradle.kts" \
-                -print0
-            )
-          fi
-
-          if [ -z "$PROJECT" ]; then
             echo
-            echo "ERROR: Android Gradle project could not be found."
-            echo
-            echo "settings.gradle.kts files:"
+            echo "All Gradle-related files:"
             find "$ROOT" \
               -type f \
-              -name "settings.gradle.kts" \
-              -print || true
-
-            echo
-            echo "app folders:"
-            find "$ROOT" \
-              -type d \
-              -name "app" \
-              -print || true
-
-            echo
-            echo "build.gradle.kts files:"
-            find "$ROOT" \
-              -type f \
-              -name "build.gradle.kts" \
-              -print || true
+              \( \
+                -name 'settings.gradle*' \
+                -o \
+                -name 'build.gradle*' \
+              \) \
+              -print \
+              | sort || true
 
             exit 1
           fi
 
-          echo
-          echo "=========================================="
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "ERROR: Android app folder was not found."
+
+            echo
+            echo "settings.gradle.kts:"
+            echo "$SETTINGS_FILE"
+
+            echo
+            echo "Directories near project:"
+            find "$PROJECT_DIR" -maxdepth 2 -type d -print | sort
+
+            exit 1
+          fi
+
           echo "ANDROID PROJECT FOUND"
-          echo "=========================================="
-          echo "$PROJECT"
           echo
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+          echo
+          echo "settings.gradle.kts:"
+          echo "$PROJECT_DIR/settings.gradle.kts"
+          echo
+          echo "app directory:"
+          echo "$PROJECT_DIR/app"
 
-          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+          echo "project=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------------------------
-      # 8. Verify project
-      # ------------------------------------------------------------
-      - name: Verify Android project
+      - name: Verify project files
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
         run: |
-          set -euo pipefail
+          set -e
 
-          echo "Project:"
+          echo "Verifying:"
           echo "$PROJECT"
           echo
 
@@ -261,30 +163,18 @@ jobs:
           test -f "$PROJECT/app/build.gradle.kts"
           test -d "$PROJECT/app/src/main"
 
-          echo "Required project files:"
-          echo "OK settings.gradle.kts"
-          echo "OK build.gradle.kts"
-          echo "OK app/build.gradle.kts"
-          echo "OK app/src/main"
+          echo "All required Android project files are present."
+
           echo
+          echo "Project contents:"
+          find "$PROJECT/app/src/main" -maxdepth 4 -type f -print | sort | head -300
 
-          echo "Android plugin / version configuration:"
-          grep -RniE \
-            'com.android.application|versionCode|versionName' \
-            "$PROJECT/settings.gradle.kts" \
-            "$PROJECT/build.gradle.kts" \
-            "$PROJECT/app/build.gradle.kts" \
-            2>/dev/null || true
-
-      # ------------------------------------------------------------
-      # 9. Verify repositories
-      # ------------------------------------------------------------
       - name: Verify Gradle repositories
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
         run: |
-          set -euo pipefail
+          set -e
 
           echo "Repository declarations:"
           echo
@@ -296,50 +186,29 @@ jobs:
             "$PROJECT/app/build.gradle.kts" \
             2>/dev/null || true
 
-      # ------------------------------------------------------------
-      # 10. Check dimensions source exists
-      # ------------------------------------------------------------
-      - name: Verify keyboard source
+      - name: Clean previous build
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
         run: |
-          set -euo pipefail
+          set -e
 
-          echo "Checking ToracoKey source files..."
-          echo
+          cd "$PROJECT"
 
-          find "$PROJECT/app/src/main" \
-            -type f \
-            -print \
-            | sort
+          gradle \
+            clean \
+            --no-daemon \
+            --stacktrace
 
-          echo
-          echo "Checking for ToracoKeyService..."
-          find "$PROJECT/app/src/main" \
-            -type f \
-            -name "ToracoKeyService.kt" \
-            -print
-
-          echo
-          echo "Checking project source..."
-          test -d "$PROJECT/app/src/main/java"
-
-          echo "Source verification completed."
-
-      # ------------------------------------------------------------
-      # 11. Build debug APK
-      # ------------------------------------------------------------
       - name: Build debug APK
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
         run: |
-          set -euo pipefail
+          set -e
 
           cd "$PROJECT"
 
-          echo
           echo "=========================================="
           echo "BUILDING TORACOKEY AI"
           echo "=========================================="
@@ -352,33 +221,39 @@ jobs:
             --refresh-dependencies \
             --no-build-cache
 
-      # ------------------------------------------------------------
-      # 12. Verify APK
-      # ------------------------------------------------------------
+          echo
+          echo "=========================================="
+          echo "APK BUILD COMPLETED"
+          echo "=========================================="
+
       - name: Verify APK
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
         run: |
-          set -euo pipefail
+          set -e
 
           APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
 
-          echo
-          echo "Checking APK..."
-          echo
+          echo "Checking APK:"
+          echo "$APK"
 
           if [ ! -f "$APK" ]; then
+            echo
             echo "ERROR: APK was not created."
+
             echo
             echo "Available build outputs:"
             find "$PROJECT/app/build" \
               -type f \
               -print \
-              2>/dev/null || true
+              2>/dev/null \
+              | sort || true
+
             exit 1
           fi
 
+          echo
           echo "=========================================="
           echo "APK CREATED SUCCESSFULLY"
           echo "=========================================="
@@ -386,17 +261,10 @@ jobs:
 
           ls -lh "$APK"
 
-          echo
-          echo "APK path:"
-          echo "$APK"
-
-      # ------------------------------------------------------------
-      # 13. Upload APK
-      # ------------------------------------------------------------
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.7-DIMENSIONS-FINAL
+          name: ToracoKeyAI-Dimensions-Only-debug
           path: ${{ steps.locate.outputs.project }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
