@@ -1,4 +1,4 @@
-name: Build ToracoKey AI
+name: Build ToracoKey AI v0.38.6
 
 on:
   workflow_dispatch:
@@ -15,8 +15,143 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Check v0.38.6 ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="ToracoKeyAI_v0.38.6_ALIGNED_BOTTOM_ROW_GBOARD_SUGGESTIONS.zip"
+
+          echo "Checking for:"
+          echo "$ZIP"
+
+          if [ ! -f "$ZIP" ]; then
+            echo
+            echo "ERROR: v0.38.6 ZIP was not found."
+            echo
+            echo "Files in repository:"
+            find . -maxdepth 3 -type f -print | sort
+            exit 1
+          fi
+
+          echo
+          echo "ZIP found successfully:"
+          ls -lh "$ZIP"
+
+      - name: Verify ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="ToracoKeyAI_v0.38.6_ALIGNED_BOTTOM_ROW_GBOARD_SUGGESTIONS.zip"
+
+          echo "Testing ZIP integrity..."
+
+          unzip -t "$ZIP"
+
+          echo
+          echo "ZIP integrity check successful."
+
+      - name: Extract v0.38.6 project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="ToracoKeyAI_v0.38.6_ALIGNED_BOTTOM_ROW_GBOARD_SUGGESTIONS.zip"
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          echo "Extracting:"
+          echo "$ZIP"
+
+          unzip -oq "$ZIP" -d extracted
+
+          echo
+          echo "Extracted project:"
+          find extracted -maxdepth 4 -type f | sort | head -n 300
+
+      - name: Locate extracted Android project
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROJECT=""
+
+          if [ -f "extracted/settings.gradle.kts" ] && \
+             [ -d "extracted/app" ]; then
+            PROJECT="$PWD/extracted"
+          fi
+
+          if [ -z "$PROJECT" ]; then
+            while IFS= read -r -d '' SETTINGS; do
+              DIR="$(dirname "$SETTINGS")"
+
+              if [ -d "$DIR/app" ] && \
+                 { [ -f "$DIR/app/build.gradle.kts" ] || [ -f "$DIR/app/build.gradle" ]; }; then
+                PROJECT="$DIR"
+                break
+              fi
+            done < <(
+              find "$PWD/extracted" \
+                -type f \
+                \( \
+                  -name "settings.gradle.kts" \
+                  -o \
+                  -name "settings.gradle" \
+                \) \
+                -print0
+            )
+          fi
+
+          if [ -z "$PROJECT" ]; then
+            echo
+            echo "ERROR: Android project could not be located."
+
+            echo
+            echo "Extracted files:"
+            find "$PWD/extracted" -maxdepth 6 -type f -print | sort
+
+            exit 1
+          fi
+
+          echo
+          echo "Android project found:"
+          echo "$PROJECT"
+
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+
+      - name: Verify v0.38.6 project
+        shell: bash
+        env:
+          PROJECT: ${{ steps.locate.outputs.project }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Verifying ToracoKey AI v0.38.6"
+          echo "=========================================="
+
+          test -f "$PROJECT/settings.gradle.kts"
+          test -f "$PROJECT/build.gradle.kts"
+          test -f "$PROJECT/app/build.gradle.kts"
+          test -d "$PROJECT/app/src/main"
+          test -f "$PROJECT/app/src/main/AndroidManifest.xml"
+
+          echo
+          echo "Required project files found."
+
+          echo
+          echo "Gradle configuration:"
+          sed -n '1,240p' "$PROJECT/settings.gradle.kts"
+
+          echo
+          echo "App configuration:"
+          sed -n '1,260p' "$PROJECT/app/build.gradle.kts"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -45,240 +180,21 @@ jobs:
           gradle-version: "8.11.1"
           cache-disabled: true
 
-      - name: Show repository contents
+      - name: Verify Gradle environment
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Repository contents"
-          echo "=========================================="
-
-          pwd
+          echo "Java:"
+          java -version
 
           echo
-          find . -maxdepth 4 -type f | sort | head -n 500
-
-      - name: Extract Android project ZIP if needed
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Checking for Android project ZIP files"
-          echo "=========================================="
-
-          ZIP_FOUND=0
-
-          while IFS= read -r -d '' ZIPFILE; do
-
-            ZIP_FOUND=1
-
-            echo
-            echo "Found ZIP:"
-            echo "$ZIPFILE"
-
-            echo
-            echo "ZIP contents:"
-            unzip -l "$ZIPFILE" | head -n 80
-
-            EXTRACT_DIR="$PWD/.toracokey-extracted"
-
-            mkdir -p "$EXTRACT_DIR"
-
-            echo
-            echo "Extracting ZIP..."
-            unzip -oq "$ZIPFILE" -d "$EXTRACT_DIR"
-
-            echo "Extraction completed."
-
-          done < <(
-            find "$PWD" \
-              -maxdepth 3 \
-              -type f \
-              -iname "*.zip" \
-              -print0
-          )
-
-          if [ "$ZIP_FOUND" -eq 0 ]; then
-            echo
-            echo "No ZIP file found."
-            echo "The repository may already contain the project directly."
-          fi
+          echo "Gradle:"
+          gradle --version
 
           echo
-          echo "Searching entire workspace after extraction..."
-
-          find "$PWD" \
-            -type f \
-            \( \
-              -name "settings.gradle.kts" \
-              -o \
-              -name "settings.gradle" \
-              -o \
-              -name "build.gradle.kts" \
-              -o \
-              -name "build.gradle" \
-              -o \
-              -name "AndroidManifest.xml" \
-            \) \
-            -print \
-            2>/dev/null || true
-
-      - name: Locate ToracoKey AI Android project
-        id: locate
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Searching for Android Gradle project"
-          echo "=========================================="
-
-          PROJECT=""
-
-          while IFS= read -r -d '' SETTINGS; do
-
-            DIR="$(dirname "$SETTINGS")"
-
-            echo
-            echo "Checking:"
-            echo "$DIR"
-
-            if [ -d "$DIR/app" ]; then
-
-              if [ -f "$DIR/app/build.gradle.kts" ] || \
-                 [ -f "$DIR/app/build.gradle" ]; then
-
-                PROJECT="$DIR"
-
-                echo
-                echo "Android project found:"
-                echo "$PROJECT"
-
-                break
-              fi
-
-            fi
-
-          done < <(
-            find "$PWD" \
-              -type f \
-              \( \
-                -name "settings.gradle.kts" \
-                -o \
-                -name "settings.gradle" \
-              \) \
-              -print0
-          )
-
-          if [ -z "$PROJECT" ]; then
-
-            echo
-            echo "=========================================="
-            echo "ERROR: Android project not found"
-            echo "=========================================="
-
-            echo
-            echo "Directories containing app:"
-            find "$PWD" \
-              -type d \
-              -name "app" \
-              -print \
-              2>/dev/null || true
-
-            echo
-            echo "Gradle settings files:"
-            find "$PWD" \
-              -type f \
-              \( \
-                -name "settings.gradle.kts" \
-                -o \
-                -name "settings.gradle" \
-              \) \
-              -print \
-              2>/dev/null || true
-
-            echo
-            echo "Gradle build files:"
-            find "$PWD" \
-              -type f \
-              \( \
-                -name "build.gradle.kts" \
-                -o \
-                -name "build.gradle" \
-              \) \
-              -print \
-              2>/dev/null || true
-
-            echo
-            echo "All top-level workspace items:"
-            find "$PWD" \
-              -maxdepth 3 \
-              -print \
-              2>/dev/null | head -n 500
-
-            exit 1
-          fi
-
-          echo
-          echo "Project selected:"
-          echo "$PROJECT"
-
-          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
-
-      - name: Verify project files
-        shell: bash
-        env:
-          PROJECT: ${{ steps.locate.outputs.project }}
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Verifying Android project"
-          echo "=========================================="
-
-          echo
-          echo "Project:"
-          echo "$PROJECT"
-
-          echo
-          echo "Project files:"
-
-          find "$PROJECT" \
-            -maxdepth 4 \
-            -type f \
-            -print \
-            | sort \
-            | head -n 500
-
-          echo
-
-          if [ ! -f "$PROJECT/settings.gradle.kts" ] && \
-             [ ! -f "$PROJECT/settings.gradle" ]; then
-            echo "ERROR: settings.gradle file missing."
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT/build.gradle.kts" ] && \
-             [ ! -f "$PROJECT/build.gradle" ]; then
-            echo "ERROR: root build.gradle file missing."
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT/app/build.gradle.kts" ] && \
-             [ ! -f "$PROJECT/app/build.gradle" ]; then
-            echo "ERROR: app/build.gradle file missing."
-            exit 1
-          fi
-
-          if [ ! -d "$PROJECT/app/src/main" ]; then
-            echo "ERROR: app/src/main directory missing."
-            exit 1
-          fi
-
-          echo
-          echo "Project verification successful."
+          echo "Android SDK:"
+          sdkmanager --list_installed | head -n 80
 
       - name: Verify repositories
         shell: bash
@@ -288,44 +204,22 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Checking Gradle repositories"
+          echo "Checking Maven repositories"
           echo "=========================================="
 
           echo
-
-          if [ -f "$PROJECT/settings.gradle.kts" ]; then
-            echo "settings.gradle.kts:"
-            grep -nE \
-              'google|mavenCentral|gradlePluginPortal|repositories' \
-              "$PROJECT/settings.gradle.kts" \
-              || true
-          fi
-
-          if [ -f "$PROJECT/settings.gradle" ]; then
-            echo "settings.gradle:"
-            grep -nE \
-              'google|mavenCentral|gradlePluginPortal|repositories' \
-              "$PROJECT/settings.gradle" \
-              || true
-          fi
+          echo "settings.gradle.kts:"
+          grep -nE \
+            'google|mavenCentral|gradlePluginPortal|repositories' \
+            "$PROJECT/settings.gradle.kts" \
+            || true
 
           echo
-
-          if [ -f "$PROJECT/build.gradle.kts" ]; then
-            echo "build.gradle.kts:"
-            grep -nE \
-              'google|mavenCentral|gradlePluginPortal|repositories' \
-              "$PROJECT/build.gradle.kts" \
-              || true
-          fi
-
-          if [ -f "$PROJECT/build.gradle" ]; then
-            echo "build.gradle:"
-            grep -nE \
-              'google|mavenCentral|gradlePluginPortal|repositories' \
-              "$PROJECT/build.gradle" \
-              || true
-          fi
+          echo "build.gradle.kts:"
+          grep -nE \
+            'google|mavenCentral|gradlePluginPortal|repositories' \
+            "$PROJECT/build.gradle.kts" \
+            || true
 
           echo
           echo "Repository check completed."
@@ -339,8 +233,9 @@ jobs:
 
           cd "$PROJECT"
 
+          echo
           echo "=========================================="
-          echo "Building ToracoKey AI"
+          echo "Building ToracoKey AI v0.38.6"
           echo "=========================================="
 
           gradle \
@@ -383,7 +278,7 @@ jobs:
 
           echo
           echo "=========================================="
-          echo "APK FOUND"
+          echo "APK CREATED SUCCESSFULLY"
           echo "=========================================="
 
           ls -lh "$APK"
@@ -391,7 +286,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-debug
+          name: ToracoKeyAI-v0.38.6-debug
           path: ${{ steps.locate.outputs.project }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 14 
