@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.38.6 Fixed
+name: Build ToracoKey AI v0.38.7 Dimensions Only
 
 on:
   workflow_dispatch:
@@ -18,19 +18,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check fixed ZIP
+      - name: Check v0.38.7 ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="ToracoKeyAI_v0.38.6_ALIGNED_BOTTOM_ROW_GBOARD_SUGGESTIONS_FIXED.zip"
+          ZIP="ToracoKeyAI_v0.38.7_DIMENSIONS_ONLY.zip"
 
-          echo "Checking for fixed ToracoKey AI ZIP..."
+          echo "Checking for:"
+          echo "$ZIP"
 
           if [ ! -f "$ZIP" ]; then
             echo
-            echo "ERROR: Fixed ZIP was not found:"
-            echo "$ZIP"
+            echo "ERROR: v0.38.7 ZIP was not found."
             echo
             echo "Repository files:"
             find . -maxdepth 3 -type f -print | sort
@@ -38,39 +38,35 @@ jobs:
           fi
 
           echo
-          echo "Fixed ZIP found:"
+          echo "ZIP found:"
           ls -lh "$ZIP"
 
-      - name: Verify fixed ZIP
+      - name: Verify ZIP integrity
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="ToracoKeyAI_v0.38.6_ALIGNED_BOTTOM_ROW_GBOARD_SUGGESTIONS_FIXED.zip"
-
-          echo "Testing ZIP integrity..."
+          ZIP="ToracoKeyAI_v0.38.7_DIMENSIONS_ONLY.zip"
 
           unzip -t "$ZIP"
 
           echo
           echo "ZIP integrity check successful."
 
-      - name: Extract fixed project
+      - name: Extract v0.38.7 project
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="ToracoKeyAI_v0.38.6_ALIGNED_BOTTOM_ROW_GBOARD_SUGGESTIONS_FIXED.zip"
+          ZIP="ToracoKeyAI_v0.38.7_DIMENSIONS_ONLY.zip"
 
           rm -rf extracted
           mkdir -p extracted
 
-          echo "Extracting fixed project..."
-
           unzip -oq "$ZIP" -d extracted
 
           echo
-          echo "Extracted files:"
+          echo "Extracted project files:"
           find extracted -maxdepth 5 -type f | sort | head -n 400
 
       - name: Locate Android project
@@ -109,10 +105,10 @@ jobs:
 
           if [ -z "$PROJECT" ]; then
             echo
-            echo "ERROR: Android Gradle project not found."
+            echo "ERROR: Android project not found."
 
             echo
-            echo "settings.gradle files:"
+            echo "Gradle settings files:"
             find "$PWD/extracted" \
               -type f \
               \( \
@@ -123,7 +119,7 @@ jobs:
               -print || true
 
             echo
-            echo "app directories:"
+            echo "App directories:"
             find "$PWD/extracted" \
               -type d \
               -name "app" \
@@ -133,7 +129,7 @@ jobs:
           fi
 
           echo
-          echo "Android project found:"
+          echo "Android project:"
           echo "$PROJECT"
 
           echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
@@ -146,7 +142,8 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Verifying ToracoKey AI project"
+          echo "Verifying ToracoKey AI v0.38.7"
+          echo "Dimensions Only"
           echo "=========================================="
 
           test -f "$PROJECT/settings.gradle.kts"
@@ -156,19 +153,7 @@ jobs:
           test -f "$PROJECT/app/src/main/AndroidManifest.xml"
 
           echo
-          echo "Required project files found."
-
-          echo
-          echo "Checking corrected fillViewport source..."
-
-          if grep -Rni "isFillViewport" \
-            "$PROJECT/app/src/main" \
-            >/dev/null 2>&1; then
-            echo "Correct isFillViewport property found."
-          else
-            echo "WARNING: isFillViewport was not found."
-            echo "Continuing so the Kotlin compiler can report the exact source state."
-          fi
+          echo "Required Android project files found."
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -202,17 +187,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Java"
-          echo "=========================================="
-
+          echo "Java:"
           java -version
 
           echo
-          echo "=========================================="
-          echo "Gradle"
-          echo "=========================================="
-
+          echo "Gradle:"
           gradle --version
 
       - name: Verify Gradle repositories
@@ -222,12 +201,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Gradle repositories"
-          echo "=========================================="
+          echo "Checking repositories..."
 
           echo
-
           echo "settings.gradle.kts:"
           grep -nE \
             'google|mavenCentral|gradlePluginPortal|repositories' \
@@ -252,7 +228,8 @@ jobs:
 
           echo
           echo "=========================================="
-          echo "Building ToracoKey AI v0.38.6 FIXED"
+          echo "Building ToracoKey AI v0.38.7"
+          echo "DIMENSIONS ONLY"
           echo "=========================================="
 
           gradle \
@@ -276,7 +253,8 @@ jobs:
 
           APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
 
-          echo "Checking APK..."
+          echo "Checking APK:"
+          echo "$APK"
 
           if [ ! -f "$APK" ]; then
             echo
@@ -300,7 +278,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.6-fixed-debug
+          name: ToracoKeyAI-v0.38.7-dimensions-only-debug
           path: ${{ steps.locate.outputs.project }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
