@@ -1,18 +1,16 @@
-name: Build ToracoKey AI
+name: Build ToracoKey AI v0.38.5
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-      - master
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build ToracoKey AI
     runs-on: ubuntu-latest
 
     steps:
@@ -23,21 +21,24 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
-          sdkmanager "platform-tools"
+          set -euo pipefail
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.11.1"
+          gradle-version: '8.11.1'
           cache-disabled: true
 
       - name: Locate ToracoKey AI Android project
@@ -45,100 +46,109 @@ jobs:
         run: |
           set -euo pipefail
 
-          WORK_DIR="$RUNNER_TEMP/toracokey_projects"
-          rm -rf "$WORK_DIR"
-          mkdir -p "$WORK_DIR"
+          is_project() {
+            local d="$1"
+            test -f "$d/settings.gradle.kts" && \
+            test -f "$d/build.gradle.kts" && \
+            test -f "$d/gradle.properties" && \
+            test -f "$d/app/build.gradle.kts" && \
+            test -f "$d/app/src/main/AndroidManifest.xml" && \
+            test -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" && \
+            test -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+          }
 
-          echo "Repository contents:"
-          find . -maxdepth 3 -type f | sort | head -300
+          PROJECT_DIR=""
 
-          echo
-          echo "Searching for Android project..."
-
-          # Case 1: Android project is already at repository root.
-          if [[ -f "settings.gradle.kts" || -f "settings.gradle" ]] && [[ -d "app" ]]; then
+          if is_project "$GITHUB_WORKSPACE"; then
+            PROJECT_DIR="$GITHUB_WORKSPACE"
             echo "Android project found at repository root."
-            echo "PROJECT_DIR=$PWD" >> "$GITHUB_ENV"
-            exit 0
           fi
 
-          # Case 2: Repository contains a ToracoKey ZIP.
-          ZIP_FILE="$(find . -type f -iname 'ToracoKeyAI*.zip' -o -type f -iname 'ToracoKey*.zip' | head -1 || true)"
+          if [ -z "$PROJECT_DIR" ]; then
+            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_projects"
+            rm -rf "$EXTRACT_ROOT"
+            mkdir -p "$EXTRACT_ROOT"
 
-          if [[ -n "$ZIP_FILE" ]]; then
-            echo "ToracoKey ZIP found: $ZIP_FILE"
+            mapfile -t ZIPS < <(
+              find "$GITHUB_WORKSPACE" \
+                -type f \
+                -name 'ToracoKeyAI*.zip' \
+                -print
+            )
 
-            EXTRACT_DIR="$WORK_DIR/extracted"
-            mkdir -p "$EXTRACT_DIR"
-
-            unzip -q "$ZIP_FILE" -d "$EXTRACT_DIR"
-
-            echo "Searching extracted ZIP for Android project..."
-
-            PROJECT="$(find "$EXTRACT_DIR" -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) -print | while read -r SETTINGS; do
-              DIR="$(dirname "$SETTINGS")"
-              if [[ -d "$DIR/app" ]]; then
-                echo "$DIR"
-                break
-              fi
-            done)"
-
-            if [[ -n "$PROJECT" ]]; then
-              echo "Android project found:"
-              echo "$PROJECT"
-              echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
-              exit 0
+            if [ "${#ZIPS[@]}" -eq 0 ]; then
+              echo "No ToracoKeyAI*.zip found."
+              exit 1
             fi
+
+            i=0
+
+            for ZIP in "${ZIPS[@]}"; do
+              i=$((i + 1))
+
+              CANDIDATE="$EXTRACT_ROOT/candidate_$i"
+
+              mkdir -p "$CANDIDATE"
+
+              echo "Inspecting: $ZIP"
+
+              unzip -q "$ZIP" -d "$CANDIDATE"
+
+              while IFS= read -r SETTINGS; do
+                D="$(dirname "$SETTINGS")"
+
+                if is_project "$D"; then
+                  PROJECT_DIR="$D"
+
+                  echo "Android project found inside: $ZIP"
+                  echo "Project directory: $PROJECT_DIR"
+
+                  break 2
+                fi
+
+              done < <(
+                find "$CANDIDATE" \
+                  -type f \
+                  -name 'settings.gradle.kts' \
+                  -print
+              )
+            done
           fi
 
-          # Case 3: Search the repository for a nested Android project.
-          PROJECT="$(find . -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) -print | while read -r SETTINGS; do
-            DIR="$(dirname "$SETTINGS")"
-            if [[ -d "$DIR/app" ]]; then
-              echo "$DIR"
-              break
-            fi
-          done)"
-
-          if [[ -n "$PROJECT" ]]; then
-            PROJECT="$(cd "$PROJECT" && pwd)"
-            echo "Nested Android project found:"
-            echo "$PROJECT"
-            echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
-            exit 0
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Could not find a valid ToracoKey AI Android project."
+            exit 1
           fi
 
-          echo "::error::Could not find a valid Android Gradle project."
-          echo "Expected settings.gradle(.kts) and app/."
-          exit 1
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify ToracoKey AI source
+      - name: Verify required project files
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$PROJECT_DIR"
 
-          echo "Project:"
-          pwd
-          echo
+          test -s app/src/main/assets/toracokey_words.tsv.gz
 
-          echo "Checking required Android files..."
+          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
+          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
+          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
 
-          test -f settings.gradle.kts || test -f settings.gradle
-          test -f build.gradle.kts || test -f build.gradle
-          test -d app
-          test -f app/build.gradle.kts || test -f app/build.gradle
-          test -f app/src/main/AndroidManifest.xml
+          grep -Fq 'versionName = "0.38.5"' \
+            app/build.gradle.kts
 
-          echo "Required project files found."
-          echo
+          grep -Fq 'private val rowHeight = dp(75)' \
+            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
 
-          echo "Checking source tree..."
-          find app/src/main -maxdepth 4 -type f | sort | head -300
+          grep -Fq 'private lateinit var modeButton: Button' \
+            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
 
-          echo
-          echo "Source verification completed."
+          grep -Fq 'private fun fillSuggestions' \
+            app/src/main/java/com/toracokey/ai/WordSuggestions.kt
+
+          echo "Required ToracoKey AI source files verified."
 
       - name: Build debug APK
         shell: bash
@@ -147,16 +157,9 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          echo "Building from:"
-          pwd
-          echo
-
-          if [[ -f gradlew ]]; then
-            chmod +x gradlew
-            ./gradlew :app:assembleDebug --no-daemon --stacktrace
-          else
-            gradle :app:assembleDebug --no-daemon --stacktrace
-          fi
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
 
       - name: Verify APK
         shell: bash
@@ -165,25 +168,13 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          APK="$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -1)"
+          test -s app/build/outputs/apk/debug/app-debug.apk
 
-          if [[ -z "$APK" ]]; then
-            echo "::error::Debug APK was not generated."
-            exit 1
-          fi
-
-          echo "APK generated successfully:"
-          echo "$APK"
-
-          echo
-          echo "APK size:"
-          du -h "$APK"
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-debug
-          path: |
-            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          name: ToracoKeyAI-v0.38.5-Aligned-Geometry-Suggestions-debug
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
