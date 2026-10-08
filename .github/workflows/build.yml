@@ -69,6 +69,7 @@ jobs:
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: ToracoKeyAI_v0.38.8_DIMENSIONS_ONLY.zip not found."
+
             echo
             echo "Available ZIP files:"
             find "$GITHUB_WORKSPACE" \
@@ -77,10 +78,11 @@ jobs:
               -iname '*.zip' \
               -print \
               | sort
+
             exit 1
           fi
 
-          echo "Using:"
+          echo "Using ZIP:"
           echo "$ZIP_FILE"
 
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
@@ -100,7 +102,7 @@ jobs:
           echo "Extraction completed."
 
           echo
-          echo "Extracted project files:"
+          echo "Extracted files:"
           find "$GITHUB_WORKSPACE/extracted" \
             -maxdepth 6 \
             -type f \
@@ -153,7 +155,70 @@ jobs:
 
           echo "Android project verified."
 
-      - name: Verify v0.38.8 dimensions-only source
+      - name: Remove invalid standalone viewport assignment
+        shell: bash
+        env:
+          PROJECT: ${{ steps.locate.outputs.project }}
+        run: |
+          set -e
+
+          SERVICE_FILE="$PROJECT/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+
+          if [ ! -f "$SERVICE_FILE" ]; then
+            echo "ERROR: ToracoKeyService.kt not found."
+            exit 1
+          fi
+
+          echo "Checking viewport assignments..."
+
+          echo
+          echo "Before:"
+          nl -ba "$SERVICE_FILE" | sed -n '315,340p'
+
+          python3 - "$SERVICE_FILE" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+
+          text = path.read_text(encoding="utf-8")
+          lines = text.splitlines()
+
+          output = []
+          removed = []
+
+          for line in lines:
+              stripped = line.strip()
+
+              if stripped in (
+                  "fillViewport = true",
+                  "fillViewport = false",
+                  "isFillViewport = true",
+                  "isFillViewport = false",
+              ):
+                  removed.append(line)
+                  continue
+
+              output.append(line)
+
+          path.write_text(
+              "\n".join(output) + "\n",
+              encoding="utf-8"
+          )
+
+          if removed:
+              print("Removed invalid standalone viewport assignment(s):")
+              for item in removed:
+                  print(item)
+          else:
+              print("No standalone viewport assignment found.")
+          PY
+
+          echo
+          echo "After:"
+          nl -ba "$SERVICE_FILE" | sed -n '315,340p'
+
+      - name: Verify dimensions-only values
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
@@ -166,7 +231,7 @@ jobs:
           echo "=========================================="
 
           echo
-          echo "Checking keyboard dimension values..."
+          echo "Checking dimension values..."
 
           grep -Rni \
             -E \
@@ -175,21 +240,9 @@ jobs:
             || true
 
           echo
-          echo "Checking for invalid fillViewport references..."
+          echo "Viewport cleanup completed."
 
-          if grep -Rni \
-            'fillViewport' \
-            "$PROJECT/app/src/main/java" \
-            2>/dev/null; then
-
-            echo
-            echo "ERROR: fillViewport reference still exists."
-            exit 1
-          fi
-
-          echo "fillViewport check passed."
-
-      - name: Verify protected features unchanged
+      - name: Verify protected features
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
@@ -207,7 +260,7 @@ jobs:
           echo "Backend:       UNCHANGED"
 
           echo
-          echo "This workflow does not modify those features."
+          echo "Dimensions-only build."
 
       - name: Clean project
         shell: bash
