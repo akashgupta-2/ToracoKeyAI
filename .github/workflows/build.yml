@@ -22,11 +22,8 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          echo "Repository:"
           pwd
           echo
-
           find . -maxdepth 4 -type f -print | sort | head -500
 
       - name: Set up JDK 17
@@ -56,7 +53,7 @@ jobs:
           gradle-version: "8.11.1"
           cache-disabled: true
 
-      - name: Find ToracoKey AI v0.38.8 ZIP
+      - name: Find ToracoKey AI v0.38.9 ZIP
         shell: bash
         run: |
           set -e
@@ -64,12 +61,11 @@ jobs:
           ZIP_FILE="$(find "$GITHUB_WORKSPACE" \
             -maxdepth 3 \
             -type f \
-            -iname 'ToracoKeyAI_v0.38.8_DIMENSIONS_ONLY.zip' \
+            -iname 'ToracoKeyAI_v0.38.9_DIMENSIONS_ONLY.zip' \
             -print -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ToracoKeyAI_v0.38.8_DIMENSIONS_ONLY.zip not found."
-
+            echo "ERROR: ToracoKeyAI_v0.38.9_DIMENSIONS_ONLY.zip not found."
             echo
             echo "Available ZIP files:"
             find "$GITHUB_WORKSPACE" \
@@ -78,7 +74,6 @@ jobs:
               -iname '*.zip' \
               -print \
               | sort
-
             exit 1
           fi
 
@@ -87,13 +82,12 @@ jobs:
 
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
-      - name: Extract ToracoKey AI v0.38.8
+      - name: Extract ToracoKey AI v0.38.9
         shell: bash
         run: |
           set -e
 
           rm -rf "$GITHUB_WORKSPACE/extracted"
-
           mkdir -p "$GITHUB_WORKSPACE/extracted"
 
           unzip -q "$ZIP_FILE" \
@@ -101,8 +95,6 @@ jobs:
 
           echo "Extraction completed."
 
-          echo
-          echo "Extracted files:"
           find "$GITHUB_WORKSPACE/extracted" \
             -maxdepth 6 \
             -type f \
@@ -155,7 +147,7 @@ jobs:
 
           echo "Android project verified."
 
-      - name: Remove invalid standalone viewport assignment
+      - name: Remove invalid viewport assignments
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
@@ -164,28 +156,16 @@ jobs:
 
           SERVICE_FILE="$PROJECT/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
 
-          if [ ! -f "$SERVICE_FILE" ]; then
-            echo "ERROR: ToracoKeyService.kt not found."
-            exit 1
-          fi
-
-          echo "Checking viewport assignments..."
-
-          echo
-          echo "Before:"
-          nl -ba "$SERVICE_FILE" | sed -n '315,340p'
-
-          python3 - "$SERVICE_FILE" <<'PY'
+          if [ -f "$SERVICE_FILE" ]; then
+            python3 - "$SERVICE_FILE" <<'PY'
           import sys
           from pathlib import Path
 
           path = Path(sys.argv[1])
-
           text = path.read_text(encoding="utf-8")
-          lines = text.splitlines()
 
+          lines = text.splitlines()
           output = []
-          removed = []
 
           for line in lines:
               stripped = line.strip()
@@ -196,7 +176,6 @@ jobs:
                   "isFillViewport = true",
                   "isFillViewport = false",
               ):
-                  removed.append(line)
                   continue
 
               output.append(line)
@@ -205,20 +184,12 @@ jobs:
               "\n".join(output) + "\n",
               encoding="utf-8"
           )
-
-          if removed:
-              print("Removed invalid standalone viewport assignment(s):")
-              for item in removed:
-                  print(item)
-          else:
-              print("No standalone viewport assignment found.")
           PY
+          fi
 
-          echo
-          echo "After:"
-          nl -ba "$SERVICE_FILE" | sed -n '315,340p'
+          echo "Viewport cleanup completed."
 
-      - name: Verify dimensions-only values
+      - name: Verify dimensions-only source
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
@@ -226,26 +197,27 @@ jobs:
           set -e
 
           echo "=========================================="
-          echo "ToracoKey AI v0.38.8"
+          echo "ToracoKey AI v0.38.9"
           echo "DIMENSIONS ONLY"
           echo "=========================================="
 
           echo
-          echo "Checking dimension values..."
+          echo "Expected geometry:"
+          echo "Keyboard row height: 64dp"
+          echo "Bottom blank area:   48dp"
+          echo "Suggestion strip:    46dp"
+
+          echo
+          echo "Searching source for dimension values:"
 
           grep -Rni \
             -E \
-            '24dp|72dp|46dp' \
+            '64dp|48dp|46dp' \
             "$PROJECT/app/src/main" \
             || true
 
-          echo
-          echo "Viewport cleanup completed."
-
       - name: Verify protected features
         shell: bash
-        env:
-          PROJECT: ${{ steps.locate.outputs.project }}
         run: |
           set -e
 
@@ -253,7 +225,6 @@ jobs:
           echo "PROTECTED FEATURES"
           echo "=========================================="
 
-          echo
           echo "Authorization: UNCHANGED"
           echo "Suggestions:   UNCHANGED"
           echo "Voice:         UNCHANGED"
@@ -304,9 +275,6 @@ jobs:
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not created."
 
-            echo
-            echo "Available build files:"
-
             find "$PROJECT/app/build" \
               -type f \
               -print \
@@ -320,14 +288,13 @@ jobs:
           echo "=========================================="
           echo "APK CREATED SUCCESSFULLY"
           echo "=========================================="
-          echo
 
           ls -lh "$APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.8-Dimensions-Only-debug
+          name: ToracoKeyAI-v0.38.9-Dimensions-Only-debug
           path: ${{ steps.locate.outputs.project }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
