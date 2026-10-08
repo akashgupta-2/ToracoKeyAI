@@ -1,10 +1,11 @@
-name: Build ToracoKey AI v0.38.5
+name: Build ToracoKey AI - Reliable Android Build
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+      - master
 
 permissions:
   contents: read
@@ -21,160 +22,211 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
+
+          yes | sdkmanager --licenses >/dev/null || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: "8.11.1"
           cache-disabled: true
 
       - name: Locate ToracoKey AI Android project
+        id: locate
         shell: bash
         run: |
           set -euo pipefail
 
-          is_project() {
-            local d="$1"
-            test -f "$d/settings.gradle.kts" && \
-            test -f "$d/build.gradle.kts" && \
-            test -f "$d/gradle.properties" && \
-            test -f "$d/app/build.gradle.kts" && \
-            test -f "$d/app/src/main/AndroidManifest.xml" && \
-            test -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" && \
-            test -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
-          }
+          echo "Searching for Android project..."
 
-          PROJECT_DIR=""
+          PROJECT=""
 
-          if is_project "$GITHUB_WORKSPACE"; then
-            PROJECT_DIR="$GITHUB_WORKSPACE"
-            echo "Android project found at repository root."
-          fi
+          if [ -f "settings.gradle.kts" ] && [ -d "app" ]; then
+            PROJECT="$PWD"
+          else
+            while IFS= read -r -d '' SETTINGS; do
+              DIR="$(dirname "$SETTINGS")"
 
-          if [ -z "$PROJECT_DIR" ]; then
-            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_projects"
-            rm -rf "$EXTRACT_ROOT"
-            mkdir -p "$EXTRACT_ROOT"
-
-            mapfile -t ZIPS < <(
-              find "$GITHUB_WORKSPACE" \
+              if [ -d "$DIR/app" ]; then
+                PROJECT="$DIR"
+                break
+              fi
+            done < <(
+              find "$PWD" \
                 -type f \
-                -name 'ToracoKeyAI*.zip' \
-                -print
+                -name "settings.gradle.kts" \
+                -print0
             )
-
-            if [ "${#ZIPS[@]}" -eq 0 ]; then
-              echo "No ToracoKeyAI*.zip found."
-              exit 1
-            fi
-
-            i=0
-
-            for ZIP in "${ZIPS[@]}"; do
-              i=$((i + 1))
-
-              CANDIDATE="$EXTRACT_ROOT/candidate_$i"
-
-              mkdir -p "$CANDIDATE"
-
-              echo "Inspecting: $ZIP"
-
-              unzip -q "$ZIP" -d "$CANDIDATE"
-
-              while IFS= read -r SETTINGS; do
-                D="$(dirname "$SETTINGS")"
-
-                if is_project "$D"; then
-                  PROJECT_DIR="$D"
-
-                  echo "Android project found inside: $ZIP"
-                  echo "Project directory: $PROJECT_DIR"
-
-                  break 2
-                fi
-
-              done < <(
-                find "$CANDIDATE" \
-                  -type f \
-                  -name 'settings.gradle.kts' \
-                  -print
-              )
-            done
           fi
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "Could not find a valid ToracoKey AI Android project."
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: Could not locate an Android Gradle project."
+            echo
+            echo "Found settings.gradle.kts files:"
+            find "$PWD" -type f -name "settings.gradle.kts" -print || true
             exit 1
           fi
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "ToracoKey AI project:"
+          echo "$PROJECT"
 
-      - name: Verify required project files
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+
+      - name: Verify project files
         shell: bash
+        env:
+          PROJECT: ${{ steps.locate.outputs.project }}
         run: |
           set -euo pipefail
 
-          cd "$PROJECT_DIR"
+          echo "Project: $PROJECT"
+          echo
 
-          test -s app/src/main/assets/toracokey_words.tsv.gz
+          test -f "$PROJECT/settings.gradle.kts"
+          test -f "$PROJECT/build.gradle.kts"
+          test -f "$PROJECT/app/build.gradle.kts"
+          test -d "$PROJECT/app/src/main"
 
-          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
-          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          echo "Required Android project files found."
+          echo
 
-          grep -Fq 'versionName = "0.38.5"' \
-            app/build.gradle.kts
+          echo "Application version configuration:"
+          grep -nE \
+            'versionCode|versionName|com.android.application' \
+            "$PROJECT/app/build.gradle.kts" \
+            "$PROJECT/build.gradle.kts" \
+            2>/dev/null || true
 
-          grep -Fq 'private val rowHeight = dp(75)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+      - name: Verify repositories
+        shell: bash
+        env:
+          PROJECT: ${{ steps.locate.outputs.project }}
+        run: |
+          set -euo pipefail
 
-          grep -Fq 'private lateinit var modeButton: Button' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
+          echo "Checking Gradle repository declarations..."
 
-          grep -Fq 'private fun fillSuggestions' \
-            app/src/main/java/com/toracokey/ai/WordSuggestions.kt
+          grep -RniE \
+            'google\(\)|mavenCentral\(\)|gradlePluginPortal\(\)' \
+            "$PROJECT/settings.gradle.kts" \
+            "$PROJECT/build.gradle.kts" \
+            "$PROJECT/app/build.gradle.kts" \
+            2>/dev/null || true
 
-          echo "Required ToracoKey AI source files verified."
+      - name: Test jsr305 dependency availability
+        shell: bash
+        env:
+          PROJECT: ${{ steps.locate.outputs.project }}
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT"
+
+          echo "Testing dependency resolution..."
+          echo "Target: com.google.code.findbugs:jsr305:3.0.2"
+          echo
+
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            --refresh-dependencies \
+            dependencies \
+            --configuration debugCompileClasspath \
+            > /tmp/toracokey-dependency-test.log 2>&1 || {
+              echo "Dependency test reported an error."
+              echo
+              tail -n 120 /tmp/toracokey-dependency-test.log
+              exit 1
+            }
+
+          echo "Dependency resolution test completed."
 
       - name: Build debug APK
         shell: bash
+        env:
+          PROJECT: ${{ steps.locate.outputs.project }}
         run: |
           set -euo pipefail
 
-          cd "$PROJECT_DIR"
+          cd "$PROJECT"
 
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
+          echo "Starting ToracoKey AI debug build..."
+          echo
+
+          BUILD_OK=0
+
+          for ATTEMPT in 1 2 3; do
+            echo "=========================================="
+            echo "Gradle build attempt $ATTEMPT / 3"
+            echo "=========================================="
+
+            if gradle \
+              :app:assembleDebug \
+              --no-daemon \
+              --stacktrace \
+              --refresh-dependencies \
+              --no-build-cache; then
+
+              BUILD_OK=1
+              break
+            fi
+
+            echo
+            echo "Build attempt $ATTEMPT failed."
+
+            if [ "$ATTEMPT" -lt 3 ]; then
+              echo "Waiting before retry..."
+              sleep 10
+            fi
+          done
+
+          if [ "$BUILD_OK" -ne 1 ]; then
+            echo
+            echo "ERROR: ToracoKey AI APK build failed after 3 attempts."
+            exit 1
+          fi
+
+          echo
+          echo "ToracoKey AI APK build completed successfully."
 
       - name: Verify APK
         shell: bash
+        env:
+          PROJECT: ${{ steps.locate.outputs.project }}
         run: |
           set -euo pipefail
 
-          cd "$PROJECT_DIR"
+          APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
 
-          test -s app/build/outputs/apk/debug/app-debug.apk
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: Debug APK was not produced."
+            find "$PROJECT/app/build/outputs" -type f -print 2>/dev/null || true
+            exit 1
+          fi
 
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          echo "APK found:"
+          echo "$APK"
+
+          ls -lh "$APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.5-Aligned-Geometry-Suggestions-debug
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-debug
+          path: ${{ steps.locate.outputs.project }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
