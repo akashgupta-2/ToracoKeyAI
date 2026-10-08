@@ -45,34 +45,85 @@ jobs:
           gradle-version: "8.11.1"
           cache-disabled: true
 
-      - name: Show repository structure
+      - name: Show repository contents
         shell: bash
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "Repository structure"
+          echo "Repository contents"
           echo "=========================================="
 
           pwd
 
           echo
-          echo "Top-level files:"
-          find . -maxdepth 3 -type f | sort | head -n 300
+          find . -maxdepth 4 -type f | sort | head -n 500
+
+      - name: Extract Android project ZIP if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Checking for Android project ZIP files"
+          echo "=========================================="
+
+          ZIP_FOUND=0
+
+          while IFS= read -r -d '' ZIPFILE; do
+
+            ZIP_FOUND=1
+
+            echo
+            echo "Found ZIP:"
+            echo "$ZIPFILE"
+
+            echo
+            echo "ZIP contents:"
+            unzip -l "$ZIPFILE" | head -n 80
+
+            EXTRACT_DIR="$PWD/.toracokey-extracted"
+
+            mkdir -p "$EXTRACT_DIR"
+
+            echo
+            echo "Extracting ZIP..."
+            unzip -oq "$ZIPFILE" -d "$EXTRACT_DIR"
+
+            echo "Extraction completed."
+
+          done < <(
+            find "$PWD" \
+              -maxdepth 3 \
+              -type f \
+              -iname "*.zip" \
+              -print0
+          )
+
+          if [ "$ZIP_FOUND" -eq 0 ]; then
+            echo
+            echo "No ZIP file found."
+            echo "The repository may already contain the project directly."
+          fi
 
           echo
-          echo "Gradle settings files:"
-          find . \
-            -type f \
-            \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
-            -print
+          echo "Searching entire workspace after extraction..."
 
-          echo
-          echo "Build files:"
-          find . \
+          find "$PWD" \
             -type f \
-            \( -name "build.gradle.kts" -o -name "build.gradle" \) \
-            -print
+            \( \
+              -name "settings.gradle.kts" \
+              -o \
+              -name "settings.gradle" \
+              -o \
+              -name "build.gradle.kts" \
+              -o \
+              -name "build.gradle" \
+              -o \
+              -name "AndroidManifest.xml" \
+            \) \
+            -print \
+            2>/dev/null || true
 
       - name: Locate ToracoKey AI Android project
         id: locate
@@ -80,60 +131,56 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Searching for Android Gradle project..."
+          echo "=========================================="
+          echo "Searching for Android Gradle project"
+          echo "=========================================="
 
           PROJECT=""
 
-          # ----------------------------------------------------
-          # Case 1: Repository root is the Android project
-          # ----------------------------------------------------
+          while IFS= read -r -d '' SETTINGS; do
 
-          if [ -d "app" ] && \
-             { [ -f "settings.gradle.kts" ] || [ -f "settings.gradle" ]; }; then
+            DIR="$(dirname "$SETTINGS")"
 
-            PROJECT="$PWD"
+            echo
+            echo "Checking:"
+            echo "$DIR"
 
-          fi
+            if [ -d "$DIR/app" ]; then
 
-          # ----------------------------------------------------
-          # Case 2: Android project is inside a subdirectory
-          # ----------------------------------------------------
+              if [ -f "$DIR/app/build.gradle.kts" ] || \
+                 [ -f "$DIR/app/build.gradle" ]; then
 
-          if [ -z "$PROJECT" ]; then
-
-            while IFS= read -r -d '' SETTINGS; do
-
-              DIR="$(dirname "$SETTINGS")"
-
-              if [ -d "$DIR/app" ]; then
                 PROJECT="$DIR"
+
+                echo
+                echo "Android project found:"
+                echo "$PROJECT"
+
                 break
               fi
 
-            done < <(
-              find "$PWD" \
-                -type f \
-                \( \
-                  -name "settings.gradle.kts" \
-                  -o \
-                  -name "settings.gradle" \
-                \) \
-                -print0
-            )
+            fi
 
-          fi
-
-          # ----------------------------------------------------
-          # Final validation
-          # ----------------------------------------------------
+          done < <(
+            find "$PWD" \
+              -type f \
+              \( \
+                -name "settings.gradle.kts" \
+                -o \
+                -name "settings.gradle" \
+              \) \
+              -print0
+          )
 
           if [ -z "$PROJECT" ]; then
 
             echo
-            echo "ERROR: Could not locate an Android Gradle project."
-            echo
+            echo "=========================================="
+            echo "ERROR: Android project not found"
+            echo "=========================================="
 
-            echo "Directories containing an app folder:"
+            echo
+            echo "Directories containing app:"
             find "$PWD" \
               -type d \
               -name "app" \
@@ -141,7 +188,7 @@ jobs:
               2>/dev/null || true
 
             echo
-            echo "Gradle settings files found:"
+            echo "Gradle settings files:"
             find "$PWD" \
               -type f \
               \( \
@@ -153,7 +200,7 @@ jobs:
               2>/dev/null || true
 
             echo
-            echo "Gradle build files found:"
+            echo "Gradle build files:"
             find "$PWD" \
               -type f \
               \( \
@@ -164,20 +211,20 @@ jobs:
               -print \
               2>/dev/null || true
 
+            echo
+            echo "All top-level workspace items:"
+            find "$PWD" \
+              -maxdepth 3 \
+              -print \
+              2>/dev/null | head -n 500
+
             exit 1
           fi
 
           echo
-          echo "=========================================="
-          echo "Android project found"
-          echo "=========================================="
+          echo "Project selected:"
           echo "$PROJECT"
 
-          echo
-          echo "Project contents:"
-          find "$PROJECT" -maxdepth 3 -type f | sort | head -n 300
-
-          echo
           echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
 
       - name: Verify project files
@@ -187,53 +234,51 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Checking project:"
+          echo "=========================================="
+          echo "Verifying Android project"
+          echo "=========================================="
+
+          echo
+          echo "Project:"
           echo "$PROJECT"
+
+          echo
+          echo "Project files:"
+
+          find "$PROJECT" \
+            -maxdepth 4 \
+            -type f \
+            -print \
+            | sort \
+            | head -n 500
 
           echo
 
           if [ ! -f "$PROJECT/settings.gradle.kts" ] && \
              [ ! -f "$PROJECT/settings.gradle" ]; then
-            echo "ERROR: settings.gradle file not found."
+            echo "ERROR: settings.gradle file missing."
             exit 1
           fi
 
           if [ ! -f "$PROJECT/build.gradle.kts" ] && \
              [ ! -f "$PROJECT/build.gradle" ]; then
-            echo "ERROR: root build.gradle file not found."
+            echo "ERROR: root build.gradle file missing."
             exit 1
           fi
 
           if [ ! -f "$PROJECT/app/build.gradle.kts" ] && \
              [ ! -f "$PROJECT/app/build.gradle" ]; then
-            echo "ERROR: app/build.gradle file not found."
+            echo "ERROR: app/build.gradle file missing."
             exit 1
           fi
 
           if [ ! -d "$PROJECT/app/src/main" ]; then
-            echo "ERROR: app/src/main directory not found."
+            echo "ERROR: app/src/main directory missing."
             exit 1
           fi
 
-          echo "=========================================="
-          echo "Project verification successful"
-          echo "=========================================="
-
           echo
-          echo "Settings:"
-          if [ -f "$PROJECT/settings.gradle.kts" ]; then
-            sed -n '1,200p' "$PROJECT/settings.gradle.kts"
-          else
-            sed -n '1,200p' "$PROJECT/settings.gradle"
-          fi
-
-          echo
-          echo "App Gradle file:"
-          if [ -f "$PROJECT/app/build.gradle.kts" ]; then
-            sed -n '1,240p' "$PROJECT/app/build.gradle.kts"
-          else
-            sed -n '1,240p' "$PROJECT/app/build.gradle"
-          fi
+          echo "Project verification successful."
 
       - name: Verify repositories
         shell: bash
@@ -242,16 +287,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Checking repository configuration..."
+          echo "=========================================="
+          echo "Checking Gradle repositories"
+          echo "=========================================="
 
           echo
-          echo "settings.gradle:"
+
           if [ -f "$PROJECT/settings.gradle.kts" ]; then
+            echo "settings.gradle.kts:"
             grep -nE \
               'google|mavenCentral|gradlePluginPortal|repositories' \
               "$PROJECT/settings.gradle.kts" \
               || true
-          else
+          fi
+
+          if [ -f "$PROJECT/settings.gradle" ]; then
+            echo "settings.gradle:"
             grep -nE \
               'google|mavenCentral|gradlePluginPortal|repositories' \
               "$PROJECT/settings.gradle" \
@@ -259,13 +310,17 @@ jobs:
           fi
 
           echo
-          echo "root build.gradle:"
+
           if [ -f "$PROJECT/build.gradle.kts" ]; then
+            echo "build.gradle.kts:"
             grep -nE \
               'google|mavenCentral|gradlePluginPortal|repositories' \
               "$PROJECT/build.gradle.kts" \
               || true
-          else
+          fi
+
+          if [ -f "$PROJECT/build.gradle" ]; then
+            echo "build.gradle:"
             grep -nE \
               'google|mavenCentral|gradlePluginPortal|repositories' \
               "$PROJECT/build.gradle" \
@@ -273,7 +328,7 @@ jobs:
           fi
 
           echo
-          echo "Repository verification completed."
+          echo "Repository check completed."
 
       - name: Build debug APK
         shell: bash
@@ -284,7 +339,6 @@ jobs:
 
           cd "$PROJECT"
 
-          echo
           echo "=========================================="
           echo "Building ToracoKey AI"
           echo "=========================================="
@@ -298,7 +352,7 @@ jobs:
 
           echo
           echo "=========================================="
-          echo "Build completed"
+          echo "BUILD SUCCESSFUL"
           echo "=========================================="
 
       - name: Verify APK
@@ -310,7 +364,7 @@ jobs:
 
           APK="$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
 
-          echo "Looking for APK:"
+          echo "Checking APK:"
           echo "$APK"
 
           if [ ! -f "$APK" ]; then
@@ -329,7 +383,7 @@ jobs:
 
           echo
           echo "=========================================="
-          echo "APK successfully created"
+          echo "APK FOUND"
           echo "=========================================="
 
           ls -lh "$APK"
