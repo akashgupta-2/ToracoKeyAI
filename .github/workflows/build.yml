@@ -1,16 +1,18 @@
-name: Build ToracoKey AI v0.38.3
+name: Build ToracoKey AI
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+      - master
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build ToracoKey AI
     runs-on: ubuntu-latest
 
     steps:
@@ -25,19 +27,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: "platform-tools"
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
-          set -euo pipefail
-
-          yes | sdkmanager --licenses >/dev/null || true
-
-          sdkmanager \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
@@ -45,140 +40,79 @@ jobs:
           gradle-version: "8.11.1"
           cache-disabled: true
 
-      # ------------------------------------------------------------
-      # Find the real Android project.
-      #
-      # The repository may contain:
-      #
-      # 1. Android project directly at root
-      # 2. ToracoKeyAI ZIP
-      # 3. ZIP containing a folder containing the Android project
-      #
-      # We locate the project instead of assuming its position.
-      # ------------------------------------------------------------
       - name: Locate ToracoKey AI Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          is_project() {
-            local d="$1"
+          WORK_DIR="$RUNNER_TEMP/toracokey_projects"
+          rm -rf "$WORK_DIR"
+          mkdir -p "$WORK_DIR"
 
-            test -f "$d/settings.gradle.kts" &&
-            test -f "$d/build.gradle.kts" &&
-            test -f "$d/gradle.properties" &&
-            test -f "$d/app/build.gradle.kts" &&
-            test -f "$d/app/src/main/AndroidManifest.xml"
-          }
+          echo "Repository contents:"
+          find . -maxdepth 3 -type f | sort | head -300
 
-          PROJECT_DIR=""
+          echo
+          echo "Searching for Android project..."
 
-          # --------------------------------------------------------
-          # Case 1: Android project already exists at repository root
-          # --------------------------------------------------------
-          if is_project "$GITHUB_WORKSPACE"; then
-            PROJECT_DIR="$GITHUB_WORKSPACE"
+          # Case 1: Android project is already at repository root.
+          if [[ -f "settings.gradle.kts" || -f "settings.gradle" ]] && [[ -d "app" ]]; then
             echo "Android project found at repository root."
+            echo "PROJECT_DIR=$PWD" >> "$GITHUB_ENV"
+            exit 0
+          fi
 
-          else
-            # ------------------------------------------------------
-            # Case 2: Find ToracoKeyAI ZIP anywhere in repository
-            # ------------------------------------------------------
-            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_projects"
+          # Case 2: Repository contains a ToracoKey ZIP.
+          ZIP_FILE="$(find . -type f -iname 'ToracoKeyAI*.zip' -o -type f -iname 'ToracoKey*.zip' | head -1 || true)"
 
-            rm -rf "$EXTRACT_ROOT"
-            mkdir -p "$EXTRACT_ROOT"
+          if [[ -n "$ZIP_FILE" ]]; then
+            echo "ToracoKey ZIP found: $ZIP_FILE"
 
-            mapfile -t ZIPS < <(
-              find "$GITHUB_WORKSPACE" \
-                -type f \
-                -iname 'ToracoKeyAI*.zip' \
-                -print
-            )
+            EXTRACT_DIR="$WORK_DIR/extracted"
+            mkdir -p "$EXTRACT_DIR"
 
-            echo "Found ${#ZIPS[@]} ToracoKeyAI ZIP file(s)."
+            unzip -q "$ZIP_FILE" -d "$EXTRACT_DIR"
 
-            if [ "${#ZIPS[@]}" -eq 0 ]; then
-              echo "ERROR: No Android project or ToracoKeyAI ZIP found."
-              echo "Repository contents:"
-              find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -print
-              exit 1
-            fi
+            echo "Searching extracted ZIP for Android project..."
 
-            INDEX=0
-
-            for ZIP in "${ZIPS[@]}"; do
-              INDEX=$((INDEX + 1))
-
-              CANDIDATE="$EXTRACT_ROOT/project_$INDEX"
-
-              mkdir -p "$CANDIDATE"
-
-              echo "----------------------------------------"
-              echo "Inspecting:"
-              echo "$ZIP"
-              echo "----------------------------------------"
-
-              unzip -q "$ZIP" -d "$CANDIDATE"
-
-              # Search for settings.gradle.kts anywhere inside ZIP.
-              while IFS= read -r SETTINGS_FILE; do
-
-                POSSIBLE_PROJECT="$(dirname "$SETTINGS_FILE")"
-
-                if is_project "$POSSIBLE_PROJECT"; then
-                  PROJECT_DIR="$POSSIBLE_PROJECT"
-
-                  echo "Android project found:"
-                  echo "$PROJECT_DIR"
-
-                  break
-                fi
-
-              done < <(
-                find "$CANDIDATE" \
-                  -type f \
-                  -name "settings.gradle.kts" \
-                  -print
-              )
-
-              if [ -n "$PROJECT_DIR" ]; then
+            PROJECT="$(find "$EXTRACT_DIR" -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) -print | while read -r SETTINGS; do
+              DIR="$(dirname "$SETTINGS")"
+              if [[ -d "$DIR/app" ]]; then
+                echo "$DIR"
                 break
               fi
-            done
+            done)"
+
+            if [[ -n "$PROJECT" ]]; then
+              echo "Android project found:"
+              echo "$PROJECT"
+              echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+              exit 0
+            fi
           fi
 
-          # --------------------------------------------------------
-          # Final project check
-          # --------------------------------------------------------
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Could not locate a valid Android project."
+          # Case 3: Search the repository for a nested Android project.
+          PROJECT="$(find . -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) -print | while read -r SETTINGS; do
+            DIR="$(dirname "$SETTINGS")"
+            if [[ -d "$DIR/app" ]]; then
+              echo "$DIR"
+              break
+            fi
+          done)"
 
-            echo ""
-            echo "Extracted/searchable files:"
-            find "${EXTRACT_ROOT:-$GITHUB_WORKSPACE}" \
-              -maxdepth 6 \
-              -type f \
-              -print | head -300
-
-            exit 1
+          if [[ -n "$PROJECT" ]]; then
+            PROJECT="$(cd "$PROJECT" && pwd)"
+            echo "Nested Android project found:"
+            echo "$PROJECT"
+            echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+            exit 0
           fi
 
-          echo ""
-          echo "========================================"
-          echo "USING ANDROID PROJECT:"
-          echo "$PROJECT_DIR"
-          echo "========================================"
+          echo "::error::Could not find a valid Android Gradle project."
+          echo "Expected settings.gradle(.kts) and app/."
+          exit 1
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      # ------------------------------------------------------------
-      # Lightweight verification only.
-      #
-      # NO brittle source grep checks here.
-      # Gradle is responsible for validating the actual project.
-      # ------------------------------------------------------------
-      - name: Verify project files
+      - name: Verify ToracoKey AI source
         shell: bash
         run: |
           set -euo pipefail
@@ -187,28 +121,25 @@ jobs:
 
           echo "Project:"
           pwd
+          echo
 
-          echo ""
           echo "Checking required Android files..."
 
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f gradle.properties
-          test -f app/build.gradle.kts
+          test -f settings.gradle.kts || test -f settings.gradle
+          test -f build.gradle.kts || test -f build.gradle
+          test -d app
+          test -f app/build.gradle.kts || test -f app/build.gradle
           test -f app/src/main/AndroidManifest.xml
 
           echo "Required project files found."
+          echo
 
-          echo ""
-          echo "Checking application version..."
+          echo "Checking source tree..."
+          find app/src/main -maxdepth 4 -type f | sort | head -300
 
-          grep -Fq 'versionName = "0.38.3"' app/build.gradle.kts
+          echo
+          echo "Source verification completed."
 
-          echo "ToracoKey AI v0.38.3 source detected."
-
-      # ------------------------------------------------------------
-      # Build the actual Android application.
-      # ------------------------------------------------------------
       - name: Build debug APK
         shell: bash
         run: |
@@ -216,40 +147,43 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          echo "Starting Gradle build..."
+          echo "Building from:"
+          pwd
+          echo
 
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
+          if [[ -f gradlew ]]; then
+            chmod +x gradlew
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          else
+            gradle :app:assembleDebug --no-daemon --stacktrace
+          fi
 
-      # ------------------------------------------------------------
-      # Confirm APK exists.
-      # ------------------------------------------------------------
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
 
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          cd "$PROJECT_DIR"
 
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not produced."
+          APK="$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -1)"
+
+          if [[ -z "$APK" ]]; then
+            echo "::error::Debug APK was not generated."
             exit 1
           fi
 
-          echo ""
-          echo "========================================"
-          echo "APK BUILD SUCCESSFUL"
-          echo "========================================"
-          echo ""
-          ls -lh "$APK"
+          echo "APK generated successfully:"
+          echo "$APK"
 
-      # ------------------------------------------------------------
-      # Upload APK
-      # ------------------------------------------------------------
+          echo
+          echo "APK size:"
+          du -h "$APK"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.3-debug
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-debug
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
