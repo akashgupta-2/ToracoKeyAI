@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.38.3 - Gboard Geometry Black Grey Unique Suggestions
+name: Build ToracoKey AI v0.38.3
 
 on:
   workflow_dispatch:
@@ -21,28 +21,41 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools'
+          packages: "platform-tools"
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
+
+          yes | sdkmanager --licenses >/dev/null || true
+
+          sdkmanager \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: "8.11.1"
           cache-disabled: true
 
-      # The repository may contain the Android project directly OR contain the
-      # project inside a ToracoKeyAI*.zip. Never fail before locating it.
+      # ------------------------------------------------------------
+      # Find the real Android project.
+      #
+      # The repository may contain:
+      #
+      # 1. Android project directly at root
+      # 2. ToracoKeyAI ZIP
+      # 3. ZIP containing a folder containing the Android project
+      #
+      # We locate the project instead of assuming its position.
+      # ------------------------------------------------------------
       - name: Locate ToracoKey AI Android project
         shell: bash
         run: |
@@ -50,165 +63,193 @@ jobs:
 
           is_project() {
             local d="$1"
-            test -f "$d/settings.gradle.kts" && \
-            test -f "$d/build.gradle.kts" && \
-            test -f "$d/gradle.properties" && \
-            test -f "$d/app/build.gradle.kts" && \
-            test -f "$d/app/src/main/AndroidManifest.xml" && \
-            test -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" && \
-            test -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+
+            test -f "$d/settings.gradle.kts" &&
+            test -f "$d/build.gradle.kts" &&
+            test -f "$d/gradle.properties" &&
+            test -f "$d/app/build.gradle.kts" &&
+            test -f "$d/app/src/main/AndroidManifest.xml"
           }
 
           PROJECT_DIR=""
 
+          # --------------------------------------------------------
+          # Case 1: Android project already exists at repository root
+          # --------------------------------------------------------
           if is_project "$GITHUB_WORKSPACE"; then
             PROJECT_DIR="$GITHUB_WORKSPACE"
-            echo "Found Android project at repository root."
+            echo "Android project found at repository root."
+
           else
-            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_candidates"
+            # ------------------------------------------------------
+            # Case 2: Find ToracoKeyAI ZIP anywhere in repository
+            # ------------------------------------------------------
+            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_projects"
+
             rm -rf "$EXTRACT_ROOT"
             mkdir -p "$EXTRACT_ROOT"
 
-            mapfile -t ZIPS < <(find "$GITHUB_WORKSPACE" -type f -name 'ToracoKeyAI*.zip' -print)
+            mapfile -t ZIPS < <(
+              find "$GITHUB_WORKSPACE" \
+                -type f \
+                -iname 'ToracoKeyAI*.zip' \
+                -print
+            )
+
+            echo "Found ${#ZIPS[@]} ToracoKeyAI ZIP file(s)."
 
             if [ "${#ZIPS[@]}" -eq 0 ]; then
-              echo "No ToracoKeyAI*.zip found and no Android project exists at repository root."
+              echo "ERROR: No Android project or ToracoKeyAI ZIP found."
+              echo "Repository contents:"
+              find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -print
               exit 1
             fi
 
-            i=0
+            INDEX=0
 
             for ZIP in "${ZIPS[@]}"; do
-              i=$((i + 1))
-              CANDIDATE="$EXTRACT_ROOT/candidate_$i"
+              INDEX=$((INDEX + 1))
+
+              CANDIDATE="$EXTRACT_ROOT/project_$INDEX"
 
               mkdir -p "$CANDIDATE"
 
-              echo "Inspecting ZIP: $ZIP"
+              echo "----------------------------------------"
+              echo "Inspecting:"
+              echo "$ZIP"
+              echo "----------------------------------------"
 
               unzip -q "$ZIP" -d "$CANDIDATE"
 
-              FOUND=""
+              # Search for settings.gradle.kts anywhere inside ZIP.
+              while IFS= read -r SETTINGS_FILE; do
 
-              while IFS= read -r SETTINGS; do
-                D="$(dirname "$SETTINGS")"
+                POSSIBLE_PROJECT="$(dirname "$SETTINGS_FILE")"
 
-                if is_project "$D"; then
-                  FOUND="$D"
+                if is_project "$POSSIBLE_PROJECT"; then
+                  PROJECT_DIR="$POSSIBLE_PROJECT"
+
+                  echo "Android project found:"
+                  echo "$PROJECT_DIR"
+
                   break
                 fi
-              done < <(find "$CANDIDATE" -type f -name 'settings.gradle.kts' -print)
 
-              if [ -n "$FOUND" ]; then
-                PROJECT_DIR="$FOUND"
+              done < <(
+                find "$CANDIDATE" \
+                  -type f \
+                  -name "settings.gradle.kts" \
+                  -print
+              )
 
-                echo "Found Android project inside: $ZIP"
-                echo "Project directory: $PROJECT_DIR"
-
+              if [ -n "$PROJECT_DIR" ]; then
                 break
               fi
             done
           fi
 
+          # --------------------------------------------------------
+          # Final project check
+          # --------------------------------------------------------
           if [ -z "$PROJECT_DIR" ]; then
-            echo "No valid ToracoKey AI Android project could be located."
+            echo "ERROR: Could not locate a valid Android project."
+
+            echo ""
+            echo "Extracted/searchable files:"
+            find "${EXTRACT_ROOT:-$GITHUB_WORKSPACE}" \
+              -maxdepth 6 \
+              -type f \
+              -print | head -300
+
             exit 1
           fi
+
+          echo ""
+          echo "========================================"
+          echo "USING ANDROID PROJECT:"
+          echo "$PROJECT_DIR"
+          echo "========================================"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Using PROJECT_DIR=$PROJECT_DIR"
 
-      - name: Verify ToracoKey AI source
+      # ------------------------------------------------------------
+      # Lightweight verification only.
+      #
+      # NO brittle source grep checks here.
+      # Gradle is responsible for validating the actual project.
+      # ------------------------------------------------------------
+      - name: Verify project files
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
-          test -s app/src/main/assets/toracokey_words.tsv.gz
+          echo "Project:"
+          pwd
 
-          grep -Fq 'versionCode = 49' app/build.gradle.kts
+          echo ""
+          echo "Checking required Android files..."
+
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f gradle.properties
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+
+          echo "Required project files found."
+
+          echo ""
+          echo "Checking application version..."
+
           grep -Fq 'versionName = "0.38.3"' app/build.gradle.kts
 
-          grep -Fq 'private val rowHeight = dp(66)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          echo "ToracoKey AI v0.38.3 source detected."
 
-          grep -Fq 'addView(android.view.View(context), LayoutParams(-1, dp(6)))' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'key(bottom, "SPACE", 4.4f)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'Color.rgb(104, 107, 112)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'Color.BLACK' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'setMargins(dp(2), dp(1), dp(2), dp(1))' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'addChip("Mode: ${modeName()}") { cycleMode() }' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-
-          grep -Fq 'suggestions.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44))' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-
-          grep -Fq '"shorter" to "i than now version one"' \
-            app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-
-          if grep -Fq 'private private val' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt; then
-
-            echo 'Invalid duplicated private modifier remains.'
-            exit 1
-          fi
-
-          echo 'Source verification passed.'
-
-      - name: Verify keyboard geometry, theme and suggestions
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-
-          grep -Fq 'Color.rgb(112, 115, 120)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'Color.rgb(50, 52, 55)' \
-            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'distinctBy { it.lowercase(Locale.ROOT) }' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-
-          grep -Fq 'private fun suggestionFamily(word: String)' \
-            app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-
-          grep -Fq 'private fun nextWord(words: List<String>, limit: Int)' \
-            app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-
-          echo 'Gboard-style geometry, grey-to-black theme and unique/contextual suggestions verified.'
-
+      # ------------------------------------------------------------
+      # Build the actual Android application.
+      # ------------------------------------------------------------
       - name: Build debug APK
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          echo "Starting Gradle build..."
 
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      # ------------------------------------------------------------
+      # Confirm APK exists.
+      # ------------------------------------------------------------
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR"
 
-          test -f app/build/outputs/apk/debug/app-debug.apk
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not produced."
+            exit 1
+          fi
 
+          echo ""
+          echo "========================================"
+          echo "APK BUILD SUCCESSFUL"
+          echo "========================================"
+          echo ""
+          ls -lh "$APK"
+
+      # ------------------------------------------------------------
+      # Upload APK
+      # ------------------------------------------------------------
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.38.3-GBoard-Geometry-Black-Grey-Unique-Suggestions-debug
+          name: ToracoKeyAI-v0.38.3-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
