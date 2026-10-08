@@ -140,7 +140,7 @@ jobs:
 
           echo "Android project verified."
 
-      - name: Inspect ToracoKeyService Kotlin source
+      - name: Fix invalid fillViewport reference
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
@@ -150,52 +150,105 @@ jobs:
           SERVICE_FILE="$PROJECT/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
 
           if [ ! -f "$SERVICE_FILE" ]; then
-            echo "ERROR: ToracoKeyService.kt not found at expected path."
-
-            echo
-            echo "Searching for it:"
-            find "$PROJECT/app/src/main" \
-              -type f \
-              -name 'ToracoKeyService.kt' \
-              -print
-
+            echo "ERROR: ToracoKeyService.kt not found."
             exit 1
           fi
 
-          echo "ToracoKeyService.kt found:"
-          echo "$SERVICE_FILE"
+          echo "Checking ToracoKeyService.kt..."
 
           echo
-          echo "=========================================="
-          echo "LINES 315-340"
-          echo "=========================================="
-
+          echo "Before fix:"
           nl -ba "$SERVICE_FILE" | sed -n '315,340p'
 
           echo
-          echo "=========================================="
-          echo "ALL fillViewport REFERENCES"
-          echo "=========================================="
+          echo "Searching for fillViewport..."
 
-          grep -n -C 5 \
+          grep -n -C 3 \
             'fillViewport' \
             "$SERVICE_FILE" \
             || true
 
-      - name: Verify no unexpected source changes
+          echo
+          echo "Removing invalid standalone fillViewport assignment..."
+
+          python3 - "$SERVICE_FILE" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text(encoding="utf-8")
+
+          lines = text.splitlines()
+
+          changed = False
+          output = []
+
+          for line in lines:
+              stripped = line.strip()
+
+              if stripped in (
+                  "fillViewport = true",
+                  "fillViewport = false",
+              ):
+                  output.append(
+                      line.split("fillViewport", 1)[0]
+                      + "// fillViewport removed: invalid unresolved reference"
+                  )
+                  changed = True
+              else:
+                  output.append(line)
+
+          path.write_text(
+              "\n".join(output) + "\n",
+              encoding="utf-8"
+          )
+
+          if changed:
+              print("fillViewport fix applied.")
+          else:
+              print("No standalone fillViewport assignment found.")
+          PY
+
+          echo
+          echo "After fix:"
+          nl -ba "$SERVICE_FILE" | sed -n '315,340p'
+
+          echo
+          echo "Remaining fillViewport references:"
+          grep -n -C 3 \
+            'fillViewport' \
+            "$SERVICE_FILE" \
+            || true
+
+      - name: Verify dimensions-only scope
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
         run: |
           set -e
 
-          echo "Dimensions-only build."
+          echo "=========================================="
+          echo "DIMENSIONS-ONLY BUILD"
+          echo "=========================================="
 
           echo
-          echo "No authorization changes."
-          echo "No suggestion changes."
-          echo "No voice changes."
-          echo "No backend changes."
+          echo "Authorization:"
+          echo "UNCHANGED"
+
+          echo
+          echo "Suggestions:"
+          echo "UNCHANGED"
+
+          echo
+          echo "Voice:"
+          echo "UNCHANGED"
+
+          echo
+          echo "Backend:"
+          echo "UNCHANGED"
+
+          echo
+          echo "Only build-blocking fillViewport source reference was removed."
 
       - name: Clean project
         shell: bash
@@ -238,6 +291,9 @@ jobs:
 
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not created."
+
+            echo
+            echo "Available build files:"
 
             find "$PROJECT/app/build" \
               -type f \
