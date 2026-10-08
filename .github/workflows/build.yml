@@ -56,38 +56,51 @@ jobs:
           gradle-version: "8.11.1"
           cache-disabled: true
 
-      - name: Extract ToracoKey AI project
+      - name: Find ToracoKey AI v0.38.8 ZIP
         shell: bash
         run: |
           set -e
 
-          echo "Searching for ZIP..."
-
           ZIP_FILE="$(find "$GITHUB_WORKSPACE" \
             -maxdepth 3 \
             -type f \
-            -iname '*.zip' \
+            -iname 'ToracoKeyAI_v0.38.8_DIMENSIONS_ONLY.zip' \
             -print -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
+            echo "ERROR: ToracoKeyAI_v0.38.8_DIMENSIONS_ONLY.zip not found."
+            echo
+            echo "Available ZIP files:"
+            find "$GITHUB_WORKSPACE" \
+              -maxdepth 3 \
+              -type f \
+              -iname '*.zip' \
+              -print \
+              | sort
             exit 1
           fi
 
-          echo "ZIP:"
+          echo "Using:"
           echo "$ZIP_FILE"
 
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      - name: Extract ToracoKey AI v0.38.8
+        shell: bash
+        run: |
+          set -e
+
           rm -rf "$GITHUB_WORKSPACE/extracted"
+
           mkdir -p "$GITHUB_WORKSPACE/extracted"
 
           unzip -q "$ZIP_FILE" \
             -d "$GITHUB_WORKSPACE/extracted"
 
-          echo
           echo "Extraction completed."
 
           echo
-          echo "Extracted files:"
+          echo "Extracted project files:"
           find "$GITHUB_WORKSPACE/extracted" \
             -maxdepth 6 \
             -type f \
@@ -140,87 +153,43 @@ jobs:
 
           echo "Android project verified."
 
-      - name: Fix invalid fillViewport reference
+      - name: Verify v0.38.8 dimensions-only source
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
         run: |
           set -e
 
-          SERVICE_FILE="$PROJECT/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+          echo "=========================================="
+          echo "ToracoKey AI v0.38.8"
+          echo "DIMENSIONS ONLY"
+          echo "=========================================="
 
-          if [ ! -f "$SERVICE_FILE" ]; then
-            echo "ERROR: ToracoKeyService.kt not found."
+          echo
+          echo "Checking keyboard dimension values..."
+
+          grep -Rni \
+            -E \
+            '24dp|72dp|46dp' \
+            "$PROJECT/app/src/main" \
+            || true
+
+          echo
+          echo "Checking for invalid fillViewport references..."
+
+          if grep -Rni \
+            'fillViewport' \
+            "$PROJECT/app/src/main/java" \
+            2>/dev/null; then
+
+            echo
+            echo "ERROR: fillViewport reference still exists."
             exit 1
           fi
 
-          echo "Checking ToracoKeyService.kt..."
+          echo "fillViewport check passed."
 
-          echo
-          echo "Before fix:"
-          nl -ba "$SERVICE_FILE" | sed -n '315,340p'
-
-          echo
-          echo "Searching for fillViewport..."
-
-          grep -n -C 3 \
-            'fillViewport' \
-            "$SERVICE_FILE" \
-            || true
-
-          echo
-          echo "Removing invalid standalone fillViewport assignment..."
-
-          python3 - "$SERVICE_FILE" <<'PY'
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-          text = path.read_text(encoding="utf-8")
-
-          lines = text.splitlines()
-
-          changed = False
-          output = []
-
-          for line in lines:
-              stripped = line.strip()
-
-              if stripped in (
-                  "fillViewport = true",
-                  "fillViewport = false",
-              ):
-                  output.append(
-                      line.split("fillViewport", 1)[0]
-                      + "// fillViewport removed: invalid unresolved reference"
-                  )
-                  changed = True
-              else:
-                  output.append(line)
-
-          path.write_text(
-              "\n".join(output) + "\n",
-              encoding="utf-8"
-          )
-
-          if changed:
-              print("fillViewport fix applied.")
-          else:
-              print("No standalone fillViewport assignment found.")
-          PY
-
-          echo
-          echo "After fix:"
-          nl -ba "$SERVICE_FILE" | sed -n '315,340p'
-
-          echo
-          echo "Remaining fillViewport references:"
-          grep -n -C 3 \
-            'fillViewport' \
-            "$SERVICE_FILE" \
-            || true
-
-      - name: Verify dimensions-only scope
+      - name: Verify protected features unchanged
         shell: bash
         env:
           PROJECT: ${{ steps.locate.outputs.project }}
@@ -228,27 +197,17 @@ jobs:
           set -e
 
           echo "=========================================="
-          echo "DIMENSIONS-ONLY BUILD"
+          echo "PROTECTED FEATURES"
           echo "=========================================="
 
           echo
-          echo "Authorization:"
-          echo "UNCHANGED"
+          echo "Authorization: UNCHANGED"
+          echo "Suggestions:   UNCHANGED"
+          echo "Voice:         UNCHANGED"
+          echo "Backend:       UNCHANGED"
 
           echo
-          echo "Suggestions:"
-          echo "UNCHANGED"
-
-          echo
-          echo "Voice:"
-          echo "UNCHANGED"
-
-          echo
-          echo "Backend:"
-          echo "UNCHANGED"
-
-          echo
-          echo "Only build-blocking fillViewport source reference was removed."
+          echo "This workflow does not modify those features."
 
       - name: Clean project
         shell: bash
@@ -315,7 +274,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-Dimensions-Only-debug
+          name: ToracoKeyAI-v0.38.8-Dimensions-Only-debug
           path: ${{ steps.locate.outputs.project }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
