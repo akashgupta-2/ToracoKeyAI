@@ -1,5 +1,5 @@
 
-name: Build ToracoKey AI
+name: Build ToracoKey AI v0.39.1
 
 on:
   workflow_dispatch:
@@ -35,35 +35,79 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager --install \
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Verify Android project
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Extract Android project
         shell: bash
         run: |
           set -euo pipefail
-          test -f settings.gradle.kts
-          test -f app/build.gradle.kts
-          test -f gradlew
-          chmod +x gradlew
+
+          ZIP="$GITHUB_WORKSPACE/ToracoKeyAI_v0.39.1_REGISTRATION_SUGGESTIONS.zip"
+          PROJECT_DIR="$RUNNER_TEMP/toracokey-project"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: Expected project ZIP was not found:"
+            echo "$ZIP"
+            echo "ZIP files available in repository:"
+            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -iname '*.zip'
+            exit 1
+          fi
+
+          mkdir -p "$PROJECT_DIR"
+          unzip -q "$ZIP" -d "$PROJECT_DIR"
+
+          if [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
+            echo "ERROR: settings.gradle.kts not found at ZIP root."
+            find "$PROJECT_DIR" -maxdepth 4 -type f | head -200
+            exit 1
+          fi
+
+          test -f "$PROJECT_DIR/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          test -f "$PROJECT_DIR/app/src/main/java/com/toracokey/ai/WordSuggestions.kt"
+          test -s "$PROJECT_DIR/app/src/main/assets/toracokey_words.tsv.gz"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project extracted and verified."
+
+      - name: Verify app version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          grep -Fq 'versionName = "0.39.1"' app/build.gradle.kts
+          grep -Fq 'versionCode = 54' app/build.gradle.kts
+          echo "ToracoKey AI v0.39.1 verified."
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           ls -lh "$APK"
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.39.1-debug-APK
+          path: ${{ runner.temp }}/toracokey-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
