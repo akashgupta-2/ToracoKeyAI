@@ -27,15 +27,14 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
-
-          yes | sdkmanager --licenses >/dev/null || true
-
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
@@ -45,34 +44,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           test -f settings.gradle.kts
           test -f app/build.gradle.kts
           test -f gradlew
-
           chmod +x gradlew
 
-          echo "Android project files verified."
-
       - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
-
           APK="app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -s "$APK" ]; then
-            echo "ERROR: Debug APK was not generated."
-            find app/build -type f -name "*.apk" -print || true
-            exit 1
-          fi
-
+          test -s "$APK"
           ls -lh "$APK"
 
       - name: Upload APK
