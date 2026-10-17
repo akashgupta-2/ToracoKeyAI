@@ -28,44 +28,37 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
-
-      - name: Check Android project
+      - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Checking Android project files..."
+          yes | sdkmanager --licenses >/dev/null || true
 
-          if [ ! -f settings.gradle.kts ]; then
-            echo "ERROR: settings.gradle.kts not found at repository root."
-            echo "Repository files:"
-            ls -la
-            exit 1
-          fi
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-          if [ ! -f app/build.gradle.kts ]; then
-            echo "ERROR: app/build.gradle.kts not found."
-            ls -la
-            exit 1
-          fi
+      - name: Verify Android project
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          echo "Project files found."
+          test -f settings.gradle.kts
+          test -f app/build.gradle.kts
+          test -f gradlew
+
+          chmod +x gradlew
+
+          echo "Android project files verified."
 
       - name: Build debug APK
         shell: bash
         run: |
           set -euo pipefail
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         shell: bash
@@ -75,15 +68,14 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -s "$APK" ]; then
-            echo "ERROR: APK was not generated."
+            echo "ERROR: Debug APK was not generated."
             find app/build -type f -name "*.apk" -print || true
             exit 1
           fi
 
           ls -lh "$APK"
-          echo "APK generated successfully."
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-debug-APK
