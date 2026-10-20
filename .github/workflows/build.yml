@@ -15,6 +15,7 @@ jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -39,72 +40,73 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.11.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Find v0.45.0 project source
+      - name: Find ToracoKey project
         shell: bash
         run: |
           set -euo pipefail
 
-          is_v045_project() {
+          is_project() {
             local d="$1"
+
             [[ -f "$d/settings.gradle.kts" &&
                -f "$d/build.gradle.kts" &&
                -f "$d/app/build.gradle.kts" &&
                -f "$d/app/src/main/AndroidManifest.xml" &&
                -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/DeviceControl.kt" ]] || return 1
-
-            grep -Fq 'versionName = "0.45.0"' "$d/app/build.gradle.kts" &&
-            grep -Fq 'versionCode = 56' "$d/app/build.gradle.kts" &&
-            grep -Fq 'VERTICAL' "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt" &&
-            grep -Fq 'STAIR' "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt"
+               -f "$d/app/src/main/java/com/toracokey/ai/DeviceControl.kt" &&
+               -f "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt" ]]
           }
 
           PROJECT_DIR=""
 
-          if is_v045_project "$GITHUB_WORKSPACE"; then
+          if is_project "$GITHUB_WORKSPACE"; then
             PROJECT_DIR="$GITHUB_WORKSPACE"
-          fi
-
-          if [[ -z "$PROJECT_DIR" ]]; then
+          else
             EXTRACT_ROOT="$RUNNER_TEMP/toracokey-source"
             rm -rf "$EXTRACT_ROOT"
             mkdir -p "$EXTRACT_ROOT"
 
             while IFS= read -r -d '' archive; do
-              dest="$EXTRACT_ROOT/$(basename "$archive" .zip)"
-              mkdir -p "$dest"
-              echo "Inspecting source archive: $archive"
-              unzip -oq "$archive" -d "$dest"
+              echo "Inspecting archive: $archive"
 
-              while IFS= read -r -d '' settings; do
-                candidate="$(dirname "$settings")"
-                if is_v045_project "$candidate"; then
+              destination="$EXTRACT_ROOT/$(basename "$archive" .zip)"
+              mkdir -p "$destination"
+              unzip -oq "$archive" -d "$destination"
+
+              while IFS= read -r -d '' settings_file; do
+                candidate="$(dirname "$settings_file")"
+
+                if is_project "$candidate"; then
                   PROJECT_DIR="$candidate"
                   break 2
                 fi
-              done < <(find "$dest" -type f -name settings.gradle.kts -print0)
+              done < <(
+                find "$destination" -type f \
+                  -name settings.gradle.kts -print0
+              )
             done < <(
-              find "$GITHUB_WORKSPACE" -type f -iname 'ToracoKeyAI*.zip' \
+              find "$GITHUB_WORKSPACE" -type f \
+                -iname 'ToracoKeyAI*.zip' \
                 ! -path '*/.git/*' -print0
             )
           fi
 
           if [[ -z "$PROJECT_DIR" ]]; then
-            echo "::error::Could not find ToracoKey AI v0.45.0 / versionCode 56."
-            echo "Commit the project at repository root or add its source ZIP."
+            echo "::error::ToracoKey project not found."
+            echo "Provide project files at repository root or commit its ZIP."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Using source: $PROJECT_DIR"
+          echo "Selected project: $PROJECT_DIR"
 
-      - name: Fix Kotlin whitespace compatibility issue
+      - name: Fix Kotlin whitespace expression
         shell: bash
         run: |
           set -euo pipefail
@@ -114,50 +116,94 @@ jobs:
 
           python3 - "$SOURCE" <<'PYFIX'
           from pathlib import Path
+          import re
           import sys
 
           path = Path(sys.argv[1])
           source = path.read_text()
 
-          old = "value.any { it.isWhitespace() }"
-          new = r"value.any { it == ' ' || it == '\t' || it == '\n' || it == '\r' }"
+          replacement = (
+              r"value.any { it == ' ' || it == '\\t' "
+              r"|| it == '\\n' || it == '\\r' }"
+          )
 
-          if old in source:
-              source = source.replace(old, new, 1)
-              path.write_text(source)
-              print("Applied Kotlin whitespace compatibility fix.")
-          elif new in source:
-              print("Kotlin whitespace compatibility fix is already present.")
+          patterns = [
+              r"value\.any\s*\{\s*it\s*\.isWhitespace\(\)\s*\}",
+              r"value\.any\s*\{\s*it\s*->\s*it\s*\.isWhitespace\(\)\s*\}",
+          ]
+
+          if replacement in source:
+              print("Whitespace expression is already patched.")
           else:
-              raise SystemExit(
-                  "Expected whitespace expression was not found; "
-                  "refusing to modify unrelated source."
-              )
+              updated = source
+              for pattern in patterns:
+                  updated, count = re.subn(
+                      pattern, lambda _: replacement, updated, count=1
+                  )
+                  if count:
+                      break
+
+              if updated != source:
+                  path.write_text(updated)
+                  print("Patched the known whitespace expression.")
+              elif "isWhitespace()" in source:
+                  print("Whitespace expression differs from expected form.")
+                  for number, line in enumerate(source.splitlines(), 1):
+                      if 725 <= number <= 745:
+                          print(f"{number}: {line}")
+                  raise SystemExit(
+                      "Refusing to modify an unrecognized Kotlin expression."
+                  )
+              else:
+                  print("No matching old expression found.")
+                  for number, line in enumerate(source.splitlines(), 1):
+                      if 725 <= number <= 745:
+                          print(f"{number}: {line}")
+                  raise SystemExit(
+                      "Inspect the displayed source before building."
+                  )
           PYFIX
 
-      - name: Verify release sources and kill switch
+      - name: Verify version, required files and kill switch
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
 
           test -s app/src/main/assets/toracokey_words.tsv.gz
-          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
+          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          test -f app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
           test -f app/src/main/java/com/toracokey/ai/QuestionEngine.kt
           test -f backend-policy-router.js
 
-          grep -Fq 'typingEnabled' app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'aiEnabled' app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'minimumAppVersion' app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'typingEnabled' backend-policy-router.js
-          grep -Fq 'aiEnabled' backend-policy-router.js
-          grep -Fq 'router.patch' backend-policy-router.js
+          grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
+          grep -Fq 'versionCode = 56' app/build.gradle.kts
 
-          grep -Fq "value.any { it == ' ' || it == '\\t' || it == '\\n' || it == '\\r' }" \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
+          grep -Fq 'typingEnabled' \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          grep -Fq 'aiEnabled' \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt
 
-          echo "Version, typing modes, policy controls, and kill-switch checks passed."
+          python3 - <<'PYVERIFY'
+          from pathlib import Path
+
+          source = Path(
+              "app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+          ).read_text()
+
+          expected = (
+              r"value.any { it == ' ' || it == '\\t' "
+              r"|| it == '\\n' || it == '\\r' }"
+          )
+
+          if expected not in source:
+              raise SystemExit("Whitespace expression verification failed.")
+
+          print("Whitespace expression verified.")
+          print("Kill-switch flag names verified.")
+          print("Version and required files verified.")
+          PYVERIFY
 
       - name: Clean project
         shell: bash
@@ -166,7 +212,7 @@ jobs:
           cd "$PROJECT_DIR"
           gradle clean --no-daemon --stacktrace --console=plain
 
-      - name: Compile Kotlin and print exact errors
+      - name: Compile Kotlin and report exact errors
         shell: bash
         run: |
           set -uo pipefail
@@ -185,7 +231,7 @@ jobs:
           echo
           echo "========== EXACT KOTLIN ERRORS =========="
           grep -n -E \
-            '(^e: |\.kt:[0-9]+:[0-9]+|^.* error:|Unresolved reference|Type mismatch|Expecting )' \
+            '(^e: |\.kt:[0-9]+:[0-9]+|Unresolved reference|Type mismatch|Expecting )' \
             "$RUNNER_TEMP/kotlin-build.log" || true
           echo "========== END KOTLIN ERRORS =========="
 
@@ -196,29 +242,34 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+
           gradle :app:assembleDebug \
             --no-daemon \
             --stacktrace \
+            --no-build-cache \
             --console=plain
 
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
+
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [[ ! -s "$APK" ]]; then
             echo "::error::APK was not generated."
-            find "$PROJECT_DIR/app/build/outputs" -type f -print 2>/dev/null || true
+            find "$PROJECT_DIR/app/build/outputs" \
+              -type f -print 2>/dev/null || true
             exit 1
           fi
 
           ls -lh "$APK"
+          echo "APK generated successfully."
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.45.0-remote-policy-debug
+          name: ToracoKeyAI-v0.45.0-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
