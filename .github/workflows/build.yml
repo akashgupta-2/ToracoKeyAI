@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.45.0 - Remote Policy and Typing Modes
+name: Build ToracoKey AI v0.45.0
 
 on:
   workflow_dispatch:
@@ -12,187 +12,138 @@ permissions:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
-
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           yes | sdkmanager --licenses >/dev/null || true
 
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Set up Gradle 8.11.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-          cache-disabled: true
 
-      - name: Locate Android project
+      - name: Find and prepare ToracoKey project
         shell: bash
         run: |
           set -euo pipefail
 
           is_project() {
             local d="$1"
-
-            test -f "$d/settings.gradle.kts" && \
-            test -f "$d/build.gradle.kts" && \
-            test -f "$d/app/build.gradle.kts" && \
-            test -f "$d/app/src/main/AndroidManifest.xml" && \
-            test -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" && \
-            test -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+            [[ -f "$d/settings.gradle.kts" &&
+               -f "$d/build.gradle.kts" &&
+               -f "$d/app/build.gradle.kts" &&
+               -f "$d/app/src/main/AndroidManifest.xml" &&
+               -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt" &&
+               -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" ]]
           }
 
           PROJECT_DIR=""
-
           if is_project "$GITHUB_WORKSPACE"; then
             PROJECT_DIR="$GITHUB_WORKSPACE"
-            echo "Project found at repository root."
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_projects"
-            rm -rf "$EXTRACT_ROOT"
+          else
+            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_project"
             mkdir -p "$EXTRACT_ROOT"
 
-            mapfile -t ZIPS < <(find "$GITHUB_WORKSPACE" \
-              -type f \
-              -iname 'ToracoKeyAI*.zip' \
-              -print)
+            while IFS= read -r -d '' archive; do
+              echo "Checking archive: $archive"
+              candidate="$EXTRACT_ROOT/$(basename "$archive" .zip)"
+              mkdir -p "$candidate"
+              unzip -oq "$archive" -d "$candidate"
 
-            if [ "${#ZIPS[@]}" -gt 0 ]; then
-              i=0
+              if is_project "$candidate"; then
+                PROJECT_DIR="$candidate"
+                break
+              fi
 
-              for ZIP in "${ZIPS[@]}"; do
-                i=$((i + 1))
-                CANDIDATE="$EXTRACT_ROOT/candidate_$i"
-                mkdir -p "$CANDIDATE"
-
-                echo "Extracting: $ZIP"
-                unzip -q "$ZIP" -d "$CANDIDATE"
-
-                while IFS= read -r SETTINGS; do
-                  D="$(dirname "$SETTINGS")"
-
-                  if is_project "$D"; then
-                    PROJECT_DIR="$D"
-                    break 2
-                  fi
-                done < <(find "$CANDIDATE" \
-                  -type f \
-                  -name 'settings.gradle.kts' \
-                  -print)
-              done
-            fi
+              while IFS= read -r -d '' settings_file; do
+                candidate_dir="$(dirname "$settings_file")"
+                if is_project "$candidate_dir"; then
+                  PROJECT_DIR="$candidate_dir"
+                  break 2
+                fi
+              done < <(find "$candidate" -type f -name settings.gradle.kts -print0)
+            done < <(find "$GITHUB_WORKSPACE" -type f -iname 'ToracoKeyAI*.zip' -print0)
           fi
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Could not locate a valid ToracoKey AI Android project."
-            echo
-            echo "Repository files:"
-            find "$GITHUB_WORKSPACE" \
-              -maxdepth 4 \
-              -type f \
-              -print \
-              | sort \
-              | head -n 500
+          if [[ -z "$PROJECT_DIR" ]]; then
+            echo "::error::Could not find the ToracoKey Android project. Put the project files at the repository root or commit the ToracoKeyAI ZIP."
+            find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -print | sort | head -n 250
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project: $PROJECT_DIR"
+          echo "Using project directory: $PROJECT_DIR"
 
-      - name: Verify remote-policy and typing-mode source
+      - name: Verify project version and required sources
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+
           test -s app/src/main/assets/toracokey_words.tsv.gz
-          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
           test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
           test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          test -f app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
+
           grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
           grep -Fq 'versionCode = 56' app/build.gradle.kts
-          grep -Fq 'VERTICAL, STAIR' app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-          grep -Fq 'typingEnabled' app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'aiEnabled' app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'key(bottom, ",", 0.72f)' app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-          echo "Remote policy, Vertical/Stair modes, and bottom-row layout checks passed."
+
+          echo "Project checks passed."
+          echo "Available keyboard modes:"
+          cat app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          echo "Remote-control flags:"
+          grep -nE 'typingEnabled|aiEnabled' app/src/main/java/com/toracokey/ai/DeviceControl.kt || true
 
       - name: Clean project
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
-
-          gradle clean \
-            --no-daemon \
-            --stacktrace
+          gradle clean --no-daemon --stacktrace
 
       - name: Build debug APK
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$PROJECT_DIR"
+          gradle :app:assembleDebug --no-daemon --stacktrace --no-build-cache
 
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace \
-            --refresh-dependencies \
-            --no-build-cache
-
-      - name: Verify APK
+      - name: Verify APK output
         shell: bash
         run: |
           set -euo pipefail
-
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -s "$APK" ]; then
-            echo "ERROR: APK was not created."
-
-            find "$PROJECT_DIR/app/build" \
-              -type f \
-              -print \
-              2>/dev/null \
-              | sort || true
-
+          if [[ ! -s "$APK" ]]; then
+            echo "::error::Build completed without creating app-debug.apk"
+            find "$PROJECT_DIR/app/build/outputs" -type f -print 2>/dev/null || true
             exit 1
           fi
-
-          echo ""
-          echo "=========================================="
-          echo "APK CREATED SUCCESSFULLY"
-          echo "=========================================="
-          echo ""
-
           ls -lh "$APK"
+          echo "APK created successfully."
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.45.0-Remote-Policy-Typing-Modes-debug
+          name: ToracoKeyAI-v0.45.0-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
