@@ -49,31 +49,54 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
-          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          test -f app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-          test -f app/src/main/java/com/toracokey/ai/Calculator.kt
-          test -f app/src/main/java/com/toracokey/ai/QuestionEngine.kt
-          test -s app/src/main/assets/toracokey_words.tsv.gz
-          test -f backend-policy-router.js
+          check_file() {
+            if [[ -f "$1" ]]; then
+              echo "PASS: $1"
+            else
+              echo "::error::Missing required file: $1"
+              exit 1
+            fi
+          }
 
-          grep -Fq 'versionName = "0.47.0"' app/build.gradle.kts
-          grep -Fq 'versionCode = 58' app/build.gradle.kts
-          grep -Fq 'const val APP_VERSION = "0.47.0"' \
+          check_text() {
+            local pattern="$1"
+            local file="$2"
+
+            if grep -Fq -- "$pattern" "$file"; then
+              echo "PASS: Found '$pattern' in $file"
+            else
+              echo "::error::Expected text not found: '$pattern' in $file"
+              grep -n -E 'versionCode|versionName|APP_VERSION|typingEnabled|aiEnabled' \
+                "$file" || true
+              exit 1
+            fi
+          }
+
+          check_file settings.gradle.kts
+          check_file build.gradle.kts
+          check_file app/build.gradle.kts
+          check_file app/src/main/AndroidManifest.xml
+          check_file app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          check_file app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
+          check_file app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          check_file app/src/main/java/com/toracokey/ai/Calculator.kt
+          check_file app/src/main/java/com/toracokey/ai/QuestionEngine.kt
+          check_file app/src/main/assets/toracokey_words.tsv.gz
+          check_file backend-policy-router.js
+
+          check_text 'versionName = "0.47.0"' app/build.gradle.kts
+          check_text 'versionCode = 58' app/build.gradle.kts
+          check_text 'APP_VERSION = "0.47.0"' \
             app/src/main/java/com/toracokey/ai/DeviceControl.kt
 
-          grep -Fq 'typingEnabled' \
+          check_text 'typingEnabled' \
             app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'aiEnabled' \
+          check_text 'aiEnabled' \
             app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'typingEnabled' backend-policy-router.js
-          grep -Fq 'aiEnabled' backend-policy-router.js
+          check_text 'typingEnabled' backend-policy-router.js
+          check_text 'aiEnabled' backend-policy-router.js
 
-          echo "Project files, version and kill-switch checks passed."
+          echo "All required source and kill-switch checks passed."
 
       - name: Clean project
         shell: bash
@@ -96,7 +119,7 @@ jobs:
           set -e
 
           echo
-          echo "========== EXACT KOTLIN ERRORS =========="
+          echo "========== KOTLIN ERRORS =========="
           grep -n -E \
             '(^e: |\.kt:[0-9]+:[0-9]+|Unresolved reference|Type mismatch|Expecting )' \
             "$RUNNER_TEMP/kotlin-build.log" || true
