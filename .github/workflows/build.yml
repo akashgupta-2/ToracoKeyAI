@@ -1,148 +1,37 @@
 
-name: Build ToracoKey AI v0.45.0
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    name: Build Android APK
-    runs-on: ubuntu-latest
-
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      # Do not run setup-android or sdkmanager here.
-      # GitHub's Ubuntu runner already has the Android SDK.
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
-
-      - name: Find ToracoKey project
+      - name: Diagnose v0.45.0 sources
         shell: bash
         run: |
-          set -euo pipefail
-
-          is_project() {
-            local d="$1"
-            [[ -f "$d/settings.gradle.kts" &&
-               -f "$d/app/build.gradle.kts" &&
-               -f "$d/app/src/main/AndroidManifest.xml" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/DeviceControl.kt" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" ]]
-          }
-
-          PROJECT_DIR=""
-
-          if is_project "$GITHUB_WORKSPACE"; then
-            PROJECT_DIR="$GITHUB_WORKSPACE"
-          else
-            while IFS= read -r -d '' archive; do
-              dest="$RUNNER_TEMP/toracokey-extracted"
-              mkdir -p "$dest"
-              unzip -oq "$archive" -d "$dest"
-
-              while IFS= read -r -d '' settings; do
-                candidate="$(dirname "$settings")"
-                if is_project "$candidate"; then
-                  PROJECT_DIR="$candidate"
-                  break 2
-                fi
-              done < <(
-                find "$dest" -type f \
-                  -name settings.gradle.kts -print0
-              )
-            done < <(
-              find "$GITHUB_WORKSPACE" -type f \
-                -iname 'ToracoKeyAI*.zip' -print0
-            )
-          fi
-
-          if [[ -z "$PROJECT_DIR" ]]; then
-            echo "::error::ToracoKey project not found."
-            echo "Place the project at the repository root or commit its ZIP."
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project found: $PROJECT_DIR"
-
-      - name: Verify v0.45.0 sources
-        shell: bash
-        run: |
-          set -euo pipefail
           cd "$PROJECT_DIR"
 
-          test -s app/src/main/assets/toracokey_words.tsv.gz
+          echo "=== Project directory ==="
+          pwd
+          echo
 
-          grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
-          grep -Fq 'versionCode = 56' app/build.gradle.kts
+          echo "=== Version configuration ==="
+          grep -nE 'versionName|versionCode' app/build.gradle.kts || true
+          echo
 
-          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
-          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          echo "=== Required files ==="
+          for f in \
+            app/src/main/assets/toracokey_words.tsv.gz \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt \
+            app/src/main/java/com/toracokey/ai/KeyboardMode.kt \
+            app/src/main/java/com/toracokey/ai/WordSuggestions.kt \
+            app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt \
+            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          do
+            if [[ -s "$f" ]]; then
+              echo "PASS: $f"
+            else
+              echo "FAIL: $f"
+            fi
+          done
 
-          echo "ToracoKey AI v0.45.0 checks passed."
+          echo
+          echo "=== Version checks ==="
+          grep -nF '0.45.0' app/build.gradle.kts || true
+          grep -nF '56' app/build.gradle.kts || true
 
-      - name: Clean project
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          gradle clean --no-daemon --stacktrace
-
-      - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [[ ! -s "$APK" ]]; then
-            echo "::error::APK was not generated."
-            find "$PROJECT_DIR/app/build/outputs" \
-              -type f -print 2>/dev/null || true
-            exit 1
-          fi
-
-          ls -lh "$APK"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ToracoKeyAI-v0.45.0-debug
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+          echo
+          echo "=== Diagnostic complete ==="
