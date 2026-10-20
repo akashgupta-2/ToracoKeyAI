@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.45.0
+name: Build ToracoKey AI v0.45.0 - Remote Policy and Typing Modes
 
 on:
   workflow_dispatch:
@@ -12,102 +12,187 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: ''
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
+
           yes | sdkmanager --licenses >/dev/null || true
+
           sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+          cache-disabled: true
 
-      - name: Extract Android project
+      - name: Locate Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="$GITHUB_WORKSPACE/ToracoKeyAI_v0.45.0_REMOTE_POLICY_VERTICAL_STAIR.zip"
-          PROJECT_DIR="$RUNNER_TEMP/toracokey-project"
+          is_project() {
+            local d="$1"
 
-          if [ ! -f "$ZIP" ]; then
-            echo "ERROR: Project ZIP not found: $ZIP"
-            find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -iname '*.zip'
-            exit 1
+            test -f "$d/settings.gradle.kts" && \
+            test -f "$d/build.gradle.kts" && \
+            test -f "$d/app/build.gradle.kts" && \
+            test -f "$d/app/src/main/AndroidManifest.xml" && \
+            test -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" && \
+            test -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+          }
+
+          PROJECT_DIR=""
+
+          if is_project "$GITHUB_WORKSPACE"; then
+            PROJECT_DIR="$GITHUB_WORKSPACE"
+            echo "Project found at repository root."
           fi
 
-          mkdir -p "$PROJECT_DIR"
-          unzip -q "$ZIP" -d "$PROJECT_DIR"
+          if [ -z "$PROJECT_DIR" ]; then
+            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_projects"
+            rm -rf "$EXTRACT_ROOT"
+            mkdir -p "$EXTRACT_ROOT"
 
-          if [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
-            echo "ERROR: Gradle project not found at ZIP root."
-            find "$PROJECT_DIR" -maxdepth 4 -type f | head -200
-            exit 1
+            mapfile -t ZIPS < <(find "$GITHUB_WORKSPACE" \
+              -type f \
+              -iname 'ToracoKeyAI*.zip' \
+              -print)
+
+            if [ "${#ZIPS[@]}" -gt 0 ]; then
+              i=0
+
+              for ZIP in "${ZIPS[@]}"; do
+                i=$((i + 1))
+                CANDIDATE="$EXTRACT_ROOT/candidate_$i"
+                mkdir -p "$CANDIDATE"
+
+                echo "Extracting: $ZIP"
+                unzip -q "$ZIP" -d "$CANDIDATE"
+
+                while IFS= read -r SETTINGS; do
+                  D="$(dirname "$SETTINGS")"
+
+                  if is_project "$D"; then
+                    PROJECT_DIR="$D"
+                    break 2
+                  fi
+                done < <(find "$CANDIDATE" \
+                  -type f \
+                  -name 'settings.gradle.kts' \
+                  -print)
+              done
+            fi
           fi
 
-          test -f "$PROJECT_DIR/build.gradle.kts"
-          test -f "$PROJECT_DIR/app/build.gradle.kts"
-          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Could not locate a valid ToracoKey AI Android project."
+            echo
+            echo "Repository files:"
+            find "$GITHUB_WORKSPACE" \
+              -maxdepth 4 \
+              -type f \
+              -print \
+              | sort \
+              | head -n 500
+            exit 1
+          fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project: $PROJECT_DIR"
 
-      - name: Verify remote policy source
+      - name: Verify remote-policy and typing-mode source
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+          test -s app/src/main/assets/toracokey_words.tsv.gz
+          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
+          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
+          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
+          grep -Fq 'versionCode = 56' app/build.gradle.kts
+          grep -Fq 'VERTICAL, STAIR' app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          grep -Fq 'typingEnabled' app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          grep -Fq 'aiEnabled' app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          grep -Fq 'key(bottom, ",", 0.72f)' app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+          echo "Remote policy, Vertical/Stair modes, and bottom-row layout checks passed."
 
-          echo "Checking for remote policy implementation..."
-          grep -RniE \
-            'typingEnabled|aiEnabled|minimumAppVersion|feature.?policy|kill.?switch' \
-            app/src/main \
-            || {
-              echo "WARNING: No matching policy identifiers found."
-              echo "The YAML cannot implement the kill switch by itself."
-            }
+      - name: Clean project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          gradle clean \
+            --no-daemon \
+            --stacktrace
 
       - name: Build debug APK
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
-          gradle :app:assembleDebug --no-daemon --stacktrace
+
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --refresh-dependencies \
+            --no-build-cache
 
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
+
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
+
+          if [ ! -s "$APK" ]; then
+            echo "ERROR: APK was not created."
+
+            find "$PROJECT_DIR/app/build" \
+              -type f \
+              -print \
+              2>/dev/null \
+              | sort || true
+
+            exit 1
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "APK CREATED SUCCESSFULLY"
+          echo "=========================================="
+          echo ""
+
           ls -lh "$APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.45.0-REMOTE-POLICY-APK
-          path: ${{ runner.temp }}/toracokey-project/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.45.0-Remote-Policy-Typing-Modes-debug
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
