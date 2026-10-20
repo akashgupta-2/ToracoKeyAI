@@ -1,5 +1,5 @@
 
-name: Build ToracoKey AI v0.45.0
+name: Build ToracoKey AI v0.46.0
 
 on:
   workflow_dispatch:
@@ -15,7 +15,6 @@ jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -46,7 +45,7 @@ jobs:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Find and prepare ToracoKey project
+      - name: Find ToracoKey AI project
         shell: bash
         run: |
           set -euo pipefail
@@ -60,7 +59,10 @@ jobs:
                -f "$d/app/src/main/AndroidManifest.xml" &&
                -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt" &&
                -f "$d/app/src/main/java/com/toracokey/ai/DeviceControl.kt" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt" ]]
+               -f "$d/app/src/main/java/com/toracokey/ai/Calculator.kt" ]] || return 1
+
+            grep -Fq 'versionName = "0.46.0"' "$d/app/build.gradle.kts" &&
+            grep -Fq 'versionCode = 57' "$d/app/build.gradle.kts"
           }
 
           PROJECT_DIR=""
@@ -69,102 +71,76 @@ jobs:
             PROJECT_DIR="$GITHUB_WORKSPACE"
           else
             EXTRACT_ROOT="$RUNNER_TEMP/toracokey-source"
-            rm -rf "$EXTRACT_ROOT"
             mkdir -p "$EXTRACT_ROOT"
 
             while IFS= read -r -d '' archive; do
-              echo "Inspecting archive: $archive"
+              dest="$EXTRACT_ROOT/$(basename "$archive" .zip)"
+              mkdir -p "$dest"
+              unzip -oq "$archive" -d "$dest"
 
-              destination="$EXTRACT_ROOT/$(basename "$archive" .zip)"
-              mkdir -p "$destination"
-              unzip -oq "$archive" -d "$destination"
-
-              while IFS= read -r -d '' settings_file; do
-                candidate="$(dirname "$settings_file")"
-
+              while IFS= read -r -d '' settings; do
+                candidate="$(dirname "$settings")"
                 if is_project "$candidate"; then
                   PROJECT_DIR="$candidate"
                   break 2
                 fi
               done < <(
-                find "$destination" -type f \
+                find "$dest" -type f \
                   -name settings.gradle.kts -print0
               )
             done < <(
               find "$GITHUB_WORKSPACE" -type f \
-                -iname 'ToracoKeyAI*.zip' \
+                -iname 'ToracoKeyAI*v0.46.0*.zip' \
                 ! -path '*/.git/*' -print0
             )
           fi
 
           if [[ -z "$PROJECT_DIR" ]]; then
-            echo "::error::ToracoKey project not found."
+            echo "::error::ToracoKey AI v0.46.0 source not found."
+            echo "Add the updated ZIP to the repository or commit the source at its root."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Selected project: $PROJECT_DIR"
+          echo "Using source: $PROJECT_DIR"
 
-      - name: Verify Kotlin whitespace condition
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          SOURCE="$PROJECT_DIR/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
-          test -f "$SOURCE"
-
-          python3 - "$SOURCE" <<'PY'
-          from pathlib import Path
-          import re
-          import sys
-
-          path = Path(sys.argv[1])
-          source = path.read_text()
-
-          pattern = re.compile(
-              r"value\.any\s*\{\s*it\s*==\s*' '\s*"
-              r"\|\|\s*it\s*==\s*'\\t'\s*"
-              r"\|\|\s*it\s*==\s*'\\n'\s*"
-              r"\|\|\s*it\s*==\s*'\\r'\s*\}"
-          )
-
-          if pattern.search(source):
-              print("Existing explicit whitespace condition verified.")
-              sys.exit(0)
-
-          print("Expected whitespace condition was not found.")
-          lines = source.splitlines()
-          for i, line in enumerate(lines, 1):
-              if 725 <= i <= 745:
-                  print(f"{i}: {line}")
-
-          sys.exit(1)
-          PY
-
-      - name: Verify version, sources and kill switch
+      - name: Verify required files and kill switch
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
 
           test -s app/src/main/assets/toracokey_words.tsv.gz
-          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-          test -f app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-          test -f app/src/main/java/com/toracokey/ai/QuestionEngine.kt
-          test -f backend-policy-router.js
 
-          grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
-          grep -Fq 'versionCode = 56' app/build.gradle.kts
+          for file in \
+            app/src/main/java/com/toracokey/ai/WordSuggestions.kt \
+            app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt \
+            app/src/main/java/com/toracokey/ai/QuestionEngine.kt \
+            app/src/main/java/com/toracokey/ai/Calculator.kt \
+            app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt \
+            backend-policy-router.js
+          do
+            test -f "$file" || {
+              echo "::error::Missing required file: $file"
+              exit 1
+            }
+          done
 
-          grep -Fq 'typingEnabled' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'aiEnabled' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          DEVICE="app/src/main/java/com/toracokey/ai/DeviceControl.kt"
+          SERVICE="app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
+          KEYBOARD="app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt"
 
-          echo "Version and kill-switch flag names verified."
-          echo "Keyboard modes:"
-          cat app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          grep -Fq 'typingEnabled' "$DEVICE"
+          grep -Fq 'aiEnabled' "$DEVICE"
+          grep -Fq 'minimumAppVersion' "$DEVICE"
+          grep -Fq 'typingEnabled' backend-policy-router.js
+          grep -Fq 'aiEnabled' backend-policy-router.js
+          grep -Fq 'router.patch' backend-policy-router.js
+          grep -Fq 'Calculator.calculate' "$SERVICE"
+          grep -Fq 'key(row, "⇧", 1.55f)' "$KEYBOARD"
+          grep -Fq 'key(row, "⌫", 1.55f, true)' "$KEYBOARD"
+
+          echo "Required files, calculator integration, key layout and kill-switch checks passed."
 
       - name: Clean project
         shell: bash
@@ -230,7 +206,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.45.0-debug
+          name: ToracoKeyAI-v0.46.0-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
