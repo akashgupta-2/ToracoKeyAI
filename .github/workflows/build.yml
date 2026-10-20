@@ -31,21 +31,21 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Locate project
+      - name: Locate ToracoKey v0.45.0
         shell: bash
         run: |
           set -euo pipefail
 
           PROJECT_DIR=""
 
-          # Prefer the v0.45.0 source archive if present.
-          while IFS= read -r -d '' zipfile; do
-            dest="$RUNNER_TEMP/toracokey-source/$(basename "$zipfile" .zip)"
+          # Prefer the uploaded source ZIP when present.
+          while IFS= read -r -d '' archive; do
+            dest="$RUNNER_TEMP/toracokey-source/$(basename "$archive" .zip)"
             mkdir -p "$dest"
-            unzip -oq "$zipfile" -d "$dest"
+            unzip -oq "$archive" -d "$dest"
 
-            while IFS= read -r -d '' gradlefile; do
-              candidate="$(dirname "$gradlefile")"
+            while IFS= read -r -d '' settings; do
+              candidate="$(dirname "$settings")"
 
               if [[ -f "$candidate/app/build.gradle.kts" ]] &&
                  grep -Fq 'versionName = "0.45.0"' \
@@ -59,37 +59,58 @@ jobs:
               ! -path '*/.git/*' -print0
           )
 
-          # Fall back to the checked-out source tree.
+          # Otherwise use the checked-out project.
           if [[ -z "$PROJECT_DIR" ]] &&
-             [[ -f app/build.gradle.kts ]] &&
-             grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts; then
+             [[ -f "$GITHUB_WORKSPACE/app/build.gradle.kts" ]] &&
+             grep -Fq 'versionName = "0.45.0"' \
+               "$GITHUB_WORKSPACE/app/build.gradle.kts"; then
             PROJECT_DIR="$GITHUB_WORKSPACE"
           fi
 
           if [[ -z "$PROJECT_DIR" ]]; then
-            echo "::error::Cannot locate ToracoKey AI v0.45.0 source."
-            echo "Commit the source ZIP or update the version check."
+            echo "::error::ToracoKey AI v0.45.0 source not found."
+            echo "Commit the source ZIP or the project files."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Selected source: $PROJECT_DIR"
 
-      - name: Verify version
+      - name: Verify source and kill-switch controls
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-          grep -F 'versionName' app/build.gradle.kts
-          grep -F 'versionCode' app/build.gradle.kts
+
+          grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
+          grep -Fq 'versionCode = 56' app/build.gradle.kts
+
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          test -f app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
+          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
+
+          grep -Fq 'typingEnabled' \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          grep -Fq 'aiEnabled' \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt
+
+          grep -Fq 'VERTICAL' \
+            app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          grep -Fq 'STAIR' \
+            app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+
+          echo "Source and kill-switch checks passed."
 
       - name: Clean project
         shell: bash
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
           gradle clean --no-daemon --console=plain
 
-      - name: Compile Kotlin and print exact errors
+      - name: Compile Kotlin and report errors
         shell: bash
         run: |
           set -uo pipefail
@@ -110,7 +131,7 @@ jobs:
           echo "========== EXACT KOTLIN ERRORS =========="
 
           grep -n -E \
-            '(^e: |\.kt:[0-9]+:[0-9]+|^.* error:|Unresolved reference|Type mismatch|Expecting )' \
+            '(^e: |\.kt:[0-9]+:[0-9]+|Unresolved reference|Type mismatch|Expecting )' \
             "$RUNNER_TEMP/kotlin-build.log" || true
 
           echo "========== END KOTLIN ERRORS =========="
@@ -122,10 +143,25 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+
           gradle :app:assembleDebug \
             --no-daemon \
             --stacktrace \
             --console=plain
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [[ ! -s "$APK" ]]; then
+            echo "::error::Debug APK was not generated."
+            exit 1
+          fi
+
+          ls -lh "$APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
