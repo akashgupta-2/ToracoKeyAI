@@ -46,7 +46,7 @@ jobs:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Find ToracoKey project
+      - name: Find and prepare ToracoKey project
         shell: bash
         run: |
           set -euo pipefail
@@ -99,14 +99,13 @@ jobs:
 
           if [[ -z "$PROJECT_DIR" ]]; then
             echo "::error::ToracoKey project not found."
-            echo "Provide project files at repository root or commit its ZIP."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Selected project: $PROJECT_DIR"
 
-      - name: Fix Kotlin whitespace expression
+      - name: Verify Kotlin whitespace condition
         shell: bash
         run: |
           set -euo pipefail
@@ -114,7 +113,7 @@ jobs:
           SOURCE="$PROJECT_DIR/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
           test -f "$SOURCE"
 
-          python3 - "$SOURCE" <<'PYFIX'
+          python3 - "$SOURCE" <<'PY'
           from pathlib import Path
           import re
           import sys
@@ -122,49 +121,27 @@ jobs:
           path = Path(sys.argv[1])
           source = path.read_text()
 
-          replacement = (
-              r"value.any { it == ' ' || it == '\\t' "
-              r"|| it == '\\n' || it == '\\r' }"
+          pattern = re.compile(
+              r"value\.any\s*\{\s*it\s*==\s*' '\s*"
+              r"\|\|\s*it\s*==\s*'\\t'\s*"
+              r"\|\|\s*it\s*==\s*'\\n'\s*"
+              r"\|\|\s*it\s*==\s*'\\r'\s*\}"
           )
 
-          patterns = [
-              r"value\.any\s*\{\s*it\s*\.isWhitespace\(\)\s*\}",
-              r"value\.any\s*\{\s*it\s*->\s*it\s*\.isWhitespace\(\)\s*\}",
-          ]
+          if pattern.search(source):
+              print("Existing explicit whitespace condition verified.")
+              sys.exit(0)
 
-          if replacement in source:
-              print("Whitespace expression is already patched.")
-          else:
-              updated = source
-              for pattern in patterns:
-                  updated, count = re.subn(
-                      pattern, lambda _: replacement, updated, count=1
-                  )
-                  if count:
-                      break
+          print("Expected whitespace condition was not found.")
+          lines = source.splitlines()
+          for i, line in enumerate(lines, 1):
+              if 725 <= i <= 745:
+                  print(f"{i}: {line}")
 
-              if updated != source:
-                  path.write_text(updated)
-                  print("Patched the known whitespace expression.")
-              elif "isWhitespace()" in source:
-                  print("Whitespace expression differs from expected form.")
-                  for number, line in enumerate(source.splitlines(), 1):
-                      if 725 <= number <= 745:
-                          print(f"{number}: {line}")
-                  raise SystemExit(
-                      "Refusing to modify an unrecognized Kotlin expression."
-                  )
-              else:
-                  print("No matching old expression found.")
-                  for number, line in enumerate(source.splitlines(), 1):
-                      if 725 <= number <= 745:
-                          print(f"{number}: {line}")
-                  raise SystemExit(
-                      "Inspect the displayed source before building."
-                  )
-          PYFIX
+          sys.exit(1)
+          PY
 
-      - name: Verify version, required files and kill switch
+      - name: Verify version, sources and kill switch
         shell: bash
         run: |
           set -euo pipefail
@@ -185,25 +162,9 @@ jobs:
           grep -Fq 'aiEnabled' \
             app/src/main/java/com/toracokey/ai/DeviceControl.kt
 
-          python3 - <<'PYVERIFY'
-          from pathlib import Path
-
-          source = Path(
-              "app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
-          ).read_text()
-
-          expected = (
-              r"value.any { it == ' ' || it == '\\t' "
-              r"|| it == '\\n' || it == '\\r' }"
-          )
-
-          if expected not in source:
-              raise SystemExit("Whitespace expression verification failed.")
-
-          print("Whitespace expression verified.")
-          print("Kill-switch flag names verified.")
-          print("Version and required files verified.")
-          PYVERIFY
+          echo "Version and kill-switch flag names verified."
+          echo "Keyboard modes:"
+          cat app/src/main/java/com/toracokey/ai/KeyboardMode.kt
 
       - name: Clean project
         shell: bash
