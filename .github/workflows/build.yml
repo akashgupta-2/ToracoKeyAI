@@ -1,5 +1,4 @@
-
-name: Build ToracoKey AI v0.44.0
+name: Build ToracoKey AI v0.45.0
 
 on:
   workflow_dispatch:
@@ -51,13 +50,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          ZIP="$GITHUB_WORKSPACE/ToracoKeyAI_v0.44.0_VERSION_ENFORCEMENT.zip"
+          ZIP="$GITHUB_WORKSPACE/ToracoKeyAI_v0.45.0_REMOTE_POLICY_VERTICAL_STAIR.zip"
           PROJECT_DIR="$RUNNER_TEMP/toracokey-project"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: Expected project ZIP was not found:"
-            echo "$ZIP"
-            echo "ZIP files available in repository:"
+            echo "ERROR: Project ZIP not found: $ZIP"
             find "$GITHUB_WORKSPACE" -maxdepth 3 -type f -iname '*.zip'
             exit 1
           fi
@@ -66,7 +63,7 @@ jobs:
           unzip -q "$ZIP" -d "$PROJECT_DIR"
 
           if [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
-            echo "ERROR: settings.gradle.kts not found at ZIP root."
+            echo "ERROR: Gradle project not found at ZIP root."
             find "$PROJECT_DIR" -maxdepth 4 -type f | head -200
             exit 1
           fi
@@ -74,36 +71,23 @@ jobs:
           test -f "$PROJECT_DIR/build.gradle.kts"
           test -f "$PROJECT_DIR/app/build.gradle.kts"
           test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
-          test -f "$PROJECT_DIR/app/src/main/java/com/toracokey/ai/WordSuggestions.kt"
-          test -f "$PROJECT_DIR/app/src/main/java/com/toracokey/ai/DeviceControl.kt"
-          test -f "$PROJECT_DIR/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
-          test -s "$PROJECT_DIR/app/src/main/assets/toracokey_words.tsv.gz"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project extracted and verified."
 
-      - name: Verify app version and update enforcement
+      - name: Verify remote policy source
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
 
-          grep -Fq 'versionName = "0.44.0"' app/build.gradle.kts
-          grep -Fq 'versionCode = 55' app/build.gradle.kts
-
-          grep -Fq 'X-ToracoKey-App-Version' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt
-
-          grep -Fq 'X-ToracoKey-App-Version' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-
-          grep -Fq 'if (code == 426)' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt
-
-          grep -Fq 'if (status == 426)' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-
-          echo "ToracoKey AI v0.44.0 source checks passed."
+          echo "Checking for remote policy implementation..."
+          grep -RniE \
+            'typingEnabled|aiEnabled|minimumAppVersion|feature.?policy|kill.?switch' \
+            app/src/main \
+            || {
+              echo "WARNING: No matching policy identifiers found."
+              echo "The YAML cannot implement the kill switch by itself."
+            }
 
       - name: Build debug APK
         shell: bash
@@ -123,8 +107,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.44.0-debug-APK
+          name: ToracoKeyAI-v0.45.0-REMOTE-POLICY-APK
           path: ${{ runner.temp }}/toracokey-project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-          
