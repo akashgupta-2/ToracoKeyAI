@@ -30,30 +30,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Check Android SDK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "ANDROID_HOME=$ANDROID_HOME"
-
-          if [[ ! -d "$ANDROID_HOME" ]]; then
-            echo "::error::Android SDK directory not found."
-            exit 1
-          fi
-
-          echo "Installed SDK platforms:"
-          ls -1 "$ANDROID_HOME/platforms" 2>/dev/null || true
-
-          echo "Installed build tools:"
-          ls -1 "$ANDROID_HOME/build-tools" 2>/dev/null || true
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: Find ToracoKey project
+      - name: Find and prepare v0.45.0 project
         shell: bash
         run: |
           set -euo pipefail
@@ -62,6 +44,7 @@ jobs:
             local d="$1"
 
             [[ -f "$d/settings.gradle.kts" &&
+               -f "$d/build.gradle.kts" &&
                -f "$d/app/build.gradle.kts" &&
                -f "$d/app/src/main/AndroidManifest.xml" &&
                -f "$d/app/src/main/java/com/toracokey/ai/DeviceControl.kt" &&
@@ -69,125 +52,88 @@ jobs:
                -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" ]]
           }
 
+          is_v045() {
+            local d="$1"
+
+            is_project "$d" &&
+            grep -Fq 'versionName = "0.45.0"' "$d/app/build.gradle.kts" &&
+            grep -Fq 'versionCode = 56' "$d/app/build.gradle.kts" &&
+            grep -Fq 'VERTICAL' "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt" &&
+            grep -Fq 'STAIR' "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt"
+          }
+
           PROJECT_DIR=""
+          EXTRACT_ROOT="$RUNNER_TEMP/toracokey-v045"
+          mkdir -p "$EXTRACT_ROOT"
 
-          if is_project "$GITHUB_WORKSPACE"; then
-            PROJECT_DIR="$GITHUB_WORKSPACE"
-          else
-            EXTRACT_ROOT="$RUNNER_TEMP/toracokey-extracted"
-            mkdir -p "$EXTRACT_ROOT"
+          # Prefer a ZIP containing the actual v0.45.0 source.
+          while IFS= read -r -d '' archive; do
+            echo "Checking archive: $archive"
 
-            while IFS= read -r -d '' archive; do
-              echo "Extracting: $archive"
+            dest="$EXTRACT_ROOT/$(basename "$archive" .zip)"
+            mkdir -p "$dest"
+            unzip -oq "$archive" -d "$dest"
 
-              dest="$EXTRACT_ROOT/$(basename "$archive" .zip)"
-              mkdir -p "$dest"
-              unzip -oq "$archive" -d "$dest"
+            while IFS= read -r -d '' settings; do
+              candidate="$(dirname "$settings")"
 
-              while IFS= read -r -d '' settings; do
-                candidate="$(dirname "$settings")"
-
-                if is_project "$candidate"; then
-                  PROJECT_DIR="$candidate"
-                  break 2
-                fi
-              done < <(
-                find "$dest" -type f \
-                  -name settings.gradle.kts -print0
-              )
+              if is_v045 "$candidate"; then
+                PROJECT_DIR="$candidate"
+                break 2
+              fi
             done < <(
-              find "$GITHUB_WORKSPACE" -type f \
-                -iname 'ToracoKeyAI*.zip' -print0
+              find "$dest" -type f \
+                -name settings.gradle.kts -print0
             )
+          done < <(
+            find "$GITHUB_WORKSPACE" \
+              -type f -iname '*.zip' \
+              ! -path '*/.git/*' -print0
+          )
+
+          # Use the repository root only if it contains v0.45.0.
+          if [[ -z "$PROJECT_DIR" ]] &&
+             is_v045 "$GITHUB_WORKSPACE"; then
+            PROJECT_DIR="$GITHUB_WORKSPACE"
           fi
 
           if [[ -z "$PROJECT_DIR" ]]; then
-            echo "::error::ToracoKey Android project not found."
-            echo "The project must be at the repository root or inside a committed ZIP."
-            find "$GITHUB_WORKSPACE" -maxdepth 4 -type f -print | head -200
+            echo "::error::Could not find a project matching v0.45.0."
+            echo "Ensure the correct project ZIP is committed to the repository."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Using project: $PROJECT_DIR"
+          echo "Selected source: $PROJECT_DIR"
 
-      - name: Diagnose v0.45.0 sources
+      - name: Verify v0.45.0 source
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
           cd "$PROJECT_DIR"
 
-          FAILED=0
+          grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
+          grep -Fq 'versionCode = 56' app/build.gradle.kts
 
-          check_file() {
-            if [[ -s "$1" ]]; then
-              echo "PASS: $1"
-            else
-              echo "FAIL: $1"
-              FAILED=1
-            fi
-          }
+          test -s app/src/main/assets/toracokey_words.tsv.gz
 
-          check_text() {
-            local pattern="$1"
-            local file="$2"
+          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
+          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
+          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
 
-            if grep -Fq "$pattern" "$file"; then
-              echo "PASS: Found '$pattern' in $file"
-            else
-              echo "FAIL: Missing '$pattern' in $file"
-              FAILED=1
-            fi
-          }
+          grep -Fq 'VERTICAL' \
+            app/src/main/java/com/toracokey/ai/KeyboardMode.kt
+          grep -Fq 'STAIR' \
+            app/src/main/java/com/toracokey/ai/KeyboardMode.kt
 
-          echo "=== Project location ==="
-          pwd
+          grep -Fq 'typingEnabled' \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          grep -Fq 'aiEnabled' \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt
 
-          echo
-          echo "=== Required files ==="
-          check_file app/src/main/AndroidManifest.xml
-          check_file app/src/main/assets/toracokey_words.tsv.gz
-          check_file app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          check_file app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-          check_file app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-          check_file app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
-          check_file app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          echo
-          echo "=== Version checks ==="
-          check_text 'versionName = "0.45.0"' app/build.gradle.kts
-          check_text 'versionCode = 56' app/build.gradle.kts
-
-          echo
-          echo "=== Typing and AI controls ==="
-          if grep -Fq 'typingEnabled' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt; then
-            echo "PASS: typingEnabled found"
-          else
-            echo "FAIL: typingEnabled not found"
-            FAILED=1
-          fi
-
-          if grep -Fq 'aiEnabled' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt; then
-            echo "PASS: aiEnabled found"
-          else
-            echo "FAIL: aiEnabled not found"
-            FAILED=1
-          fi
-
-          echo
-          echo "=== Keyboard modes ==="
-          cat app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-
-          echo
-          echo "=== Diagnostic result ==="
-          if [[ "$FAILED" -ne 0 ]]; then
-            echo "::error::One or more source checks failed. See the FAIL lines above."
-            exit 1
-          fi
-
-          echo "All required source checks passed."
+          echo "All v0.45.0 source checks passed."
 
       - name: Clean project
         shell: bash
@@ -201,12 +147,11 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-
           gradle :app:assembleDebug \
             --no-daemon \
             --stacktrace
 
-      - name: Verify APK output
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
@@ -214,13 +159,12 @@ jobs:
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
           if [[ ! -s "$APK" ]]; then
-            echo "::error::Debug APK was not generated."
+            echo "::error::APK was not generated."
             find "$PROJECT_DIR/app/build/outputs" \
               -type f -print 2>/dev/null || true
             exit 1
           fi
 
-          echo "APK successfully generated:"
           ls -lh "$APK"
 
       - name: Upload debug APK
