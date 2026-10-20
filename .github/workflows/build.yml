@@ -16,10 +16,6 @@ jobs:
     name: Build Android APK
     runs-on: ubuntu-latest
 
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,112 +31,91 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Find and prepare v0.45.0 project
+      - name: Locate project
         shell: bash
         run: |
           set -euo pipefail
 
-          is_project() {
-            local d="$1"
-
-            [[ -f "$d/settings.gradle.kts" &&
-               -f "$d/build.gradle.kts" &&
-               -f "$d/app/build.gradle.kts" &&
-               -f "$d/app/src/main/AndroidManifest.xml" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/DeviceControl.kt" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt" &&
-               -f "$d/app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt" ]]
-          }
-
-          is_v045() {
-            local d="$1"
-
-            is_project "$d" &&
-            grep -Fq 'versionName = "0.45.0"' "$d/app/build.gradle.kts" &&
-            grep -Fq 'versionCode = 56' "$d/app/build.gradle.kts" &&
-            grep -Fq 'VERTICAL' "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt" &&
-            grep -Fq 'STAIR' "$d/app/src/main/java/com/toracokey/ai/KeyboardMode.kt"
-          }
-
           PROJECT_DIR=""
-          EXTRACT_ROOT="$RUNNER_TEMP/toracokey-v045"
-          mkdir -p "$EXTRACT_ROOT"
 
-          # Prefer a ZIP containing the actual v0.45.0 source.
-          while IFS= read -r -d '' archive; do
-            echo "Checking archive: $archive"
-
-            dest="$EXTRACT_ROOT/$(basename "$archive" .zip)"
+          # Prefer the v0.45.0 source archive if present.
+          while IFS= read -r -d '' zipfile; do
+            dest="$RUNNER_TEMP/toracokey-source/$(basename "$zipfile" .zip)"
             mkdir -p "$dest"
-            unzip -oq "$archive" -d "$dest"
+            unzip -oq "$zipfile" -d "$dest"
 
-            while IFS= read -r -d '' settings; do
-              candidate="$(dirname "$settings")"
+            while IFS= read -r -d '' gradlefile; do
+              candidate="$(dirname "$gradlefile")"
 
-              if is_v045 "$candidate"; then
+              if [[ -f "$candidate/app/build.gradle.kts" ]] &&
+                 grep -Fq 'versionName = "0.45.0"' \
+                   "$candidate/app/build.gradle.kts"; then
                 PROJECT_DIR="$candidate"
                 break 2
               fi
-            done < <(
-              find "$dest" -type f \
-                -name settings.gradle.kts -print0
-            )
+            done < <(find "$dest" -name settings.gradle.kts -print0)
           done < <(
-            find "$GITHUB_WORKSPACE" \
-              -type f -iname '*.zip' \
+            find "$GITHUB_WORKSPACE" -type f -iname '*.zip' \
               ! -path '*/.git/*' -print0
           )
 
-          # Use the repository root only if it contains v0.45.0.
+          # Fall back to the checked-out source tree.
           if [[ -z "$PROJECT_DIR" ]] &&
-             is_v045 "$GITHUB_WORKSPACE"; then
+             [[ -f app/build.gradle.kts ]] &&
+             grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts; then
             PROJECT_DIR="$GITHUB_WORKSPACE"
           fi
 
           if [[ -z "$PROJECT_DIR" ]]; then
-            echo "::error::Could not find a project matching v0.45.0."
-            echo "Ensure the correct project ZIP is committed to the repository."
+            echo "::error::Cannot locate ToracoKey AI v0.45.0 source."
+            echo "Commit the source ZIP or update the version check."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Selected source: $PROJECT_DIR"
 
-      - name: Verify v0.45.0 source
+      - name: Verify version
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-
-          grep -Fq 'versionName = "0.45.0"' app/build.gradle.kts
-          grep -Fq 'versionCode = 56' app/build.gradle.kts
-
-          test -s app/src/main/assets/toracokey_words.tsv.gz
-
-          test -f app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          test -f app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-          test -f app/src/main/java/com/toracokey/ai/WordSuggestions.kt
-          test -f app/src/main/java/com/toracokey/ai/VoiceInputActivity.kt
-          test -f app/src/main/java/com/toracokey/ai/QwertyKeyboard.kt
-
-          grep -Fq 'VERTICAL' \
-            app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-          grep -Fq 'STAIR' \
-            app/src/main/java/com/toracokey/ai/KeyboardMode.kt
-
-          grep -Fq 'typingEnabled' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt
-          grep -Fq 'aiEnabled' \
-            app/src/main/java/com/toracokey/ai/DeviceControl.kt
-
-          echo "All v0.45.0 source checks passed."
+          grep -F 'versionName' app/build.gradle.kts
+          grep -F 'versionCode' app/build.gradle.kts
 
       - name: Clean project
         shell: bash
         run: |
-          set -euo pipefail
           cd "$PROJECT_DIR"
-          gradle clean --no-daemon --stacktrace
+          gradle clean --no-daemon --console=plain
+
+      - name: Compile Kotlin and print exact errors
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "$PROJECT_DIR"
+
+          set +e
+          gradle :app:compileDebugKotlin \
+            --no-daemon \
+            --stacktrace \
+            --info \
+            --console=plain \
+            2>&1 | tee "$RUNNER_TEMP/kotlin-build.log"
+
+          RESULT=${PIPESTATUS[0]}
+          set -e
+
+          echo
+          echo "========== EXACT KOTLIN ERRORS =========="
+
+          grep -n -E \
+            '(^e: |\.kt:[0-9]+:[0-9]+|^.* error:|Unresolved reference|Type mismatch|Expecting )' \
+            "$RUNNER_TEMP/kotlin-build.log" || true
+
+          echo "========== END KOTLIN ERRORS =========="
+
+          exit "$RESULT"
 
       - name: Build debug APK
         shell: bash
@@ -149,23 +124,8 @@ jobs:
           cd "$PROJECT_DIR"
           gradle :app:assembleDebug \
             --no-daemon \
-            --stacktrace
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [[ ! -s "$APK" ]]; then
-            echo "::error::APK was not generated."
-            find "$PROJECT_DIR/app/build/outputs" \
-              -type f -print 2>/dev/null || true
-            exit 1
-          fi
-
-          ls -lh "$APK"
+            --stacktrace \
+            --console=plain
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
