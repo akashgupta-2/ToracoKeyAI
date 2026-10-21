@@ -27,10 +27,15 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
 
       - name: Install Android SDK packages
         run: |
-          sdkmanager --sdk_root="$ANDROID_HOME" --install \
+          sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
@@ -39,17 +44,15 @@ jobs:
         run: |
           ls -la
           test -f gradlew
-
-      - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
+          chmod +x gradlew
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         run: |
-          find app/build/outputs/apk -type f -name '*.apk' -print
           test -s app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
