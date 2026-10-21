@@ -1,4 +1,3 @@
-
 name: Build ToracoKey AI v0.48.0 - Dictionary Update
 
 on:
@@ -31,51 +30,26 @@ jobs:
 
       - name: Install Android SDK packages
         run: |
-          sdkmanager --install \
+          sdkmanager --sdk_root="$ANDROID_HOME" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Verify project files
+      - name: Locate Gradle wrapper
         run: |
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
-          echo "Android project files found."
+          ls -la
+          test -f gradlew
 
-      - name: Verify dictionary assets
-        shell: bash
-        run: |
-          set -e
-          find app/src/main -type f \
-            \( -iname '*word*' -o -iname '*dict*' -o -iname '*.tsv.gz' \) \
-            -print
-
-      - name: Verify app version
-        run: |
-          grep -n 'versionName' app/build.gradle.kts || true
-          grep -n 'versionCode' app/build.gradle.kts || true
-
-      - name: Check Kotlin compilation
-        run: |
-          gradle :app:compileDebugKotlin \
-            --no-daemon \
-            --stacktrace
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
 
       - name: Build debug APK
-        run: |
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         run: |
+          find app/build/outputs/apk -type f -name '*.apk' -print
           test -s app/build/outputs/apk/debug/app-debug.apk
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
