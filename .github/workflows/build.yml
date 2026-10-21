@@ -15,6 +15,9 @@ jobs:
     name: Build Android APK
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,12 +28,27 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
+      - name: Configure Android SDK
+        shell: bash
         run: |
-          sdkmanager --install \
+          set -euo pipefail
+
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager -print -quit)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::Android sdkmanager not found."
+            exit 1
+          fi
+
+          echo "SDK manager: $SDKMANAGER"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses \
+            >/dev/null 2>&1 || true
+
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
@@ -48,7 +66,7 @@ jobs:
           ZIP="ToracoKeyAI_v0.48.0_DICTIONARY_DEDUP_FIX.zip"
 
           if [ ! -f "$ZIP" ]; then
-            echo "::error::ZIP not found: $ZIP"
+            echo "::error::Project ZIP missing: $ZIP"
             find . -maxdepth 2 -type f -iname '*.zip'
             exit 1
           fi
@@ -56,21 +74,21 @@ jobs:
           mkdir -p extracted
           unzip -oq "$ZIP" -d extracted
 
-          SETTINGS_FILE="$(find extracted -type f \
-            \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) \
+          SETTINGS="$(find extracted -type f \
+            \( -name settings.gradle.kts -o -name settings.gradle \) \
             -print -quit)"
 
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "::error::No Gradle settings file found in ZIP"
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::No Gradle settings file found in ZIP."
             find extracted -maxdepth 5 -type f | head -n 100
             exit 1
           fi
 
-          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          PROJECT_DIR="$(dirname "$SETTINGS")"
 
           if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ] &&
              [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
-            echo "::error::Android app Gradle file not found"
+            echo "::error::App Gradle file missing."
             exit 1
           fi
 
@@ -98,11 +116,10 @@ jobs:
           set -euo pipefail
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
-          if [ ! -s "$APK" ]; then
-            echo "::error::APK was not generated"
-            find "$PROJECT_DIR/app/build/outputs" -type f || true
+          test -s "$APK" || {
+            echo "::error::APK was not generated."
             exit 1
-          fi
+          }
 
           ls -lh "$APK"
 
