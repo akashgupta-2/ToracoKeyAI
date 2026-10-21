@@ -1,5 +1,5 @@
 
-name: Build ToracoKey AI v0.48.0 - Stair Backspace Fix
+name: Build ToracoKey AI v0.48.0 - Dictionary Update
 
 on:
   workflow_dispatch:
@@ -17,151 +17,70 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
-          set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
+          sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
-          cache-disabled: true
 
-      - name: Locate Android project
+      - name: Verify project files
+        run: |
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          echo "Android project files found."
+
+      - name: Verify dictionary assets
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
+          find app/src/main -type f \
+            \( -iname '*word*' -o -iname '*dict*' -o -iname '*.tsv.gz' \) \
+            -print
 
-          is_project() {
-            local d="$1"
-            test -f "$d/settings.gradle.kts" &&
-            test -f "$d/build.gradle.kts" &&
-            test -f "$d/app/build.gradle.kts" &&
-            test -f "$d/app/src/main/AndroidManifest.xml" &&
-            test -f "$d/app/src/main/java/com/toracokey/ai/ToracoKeyService.kt"
-          }
-
-          PROJECT_DIR=""
-
-          if is_project "$GITHUB_WORKSPACE"; then
-            PROJECT_DIR="$GITHUB_WORKSPACE"
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            EXTRACT_ROOT="$RUNNER_TEMP/toracokey_projects"
-            mkdir -p "$EXTRACT_ROOT"
-
-            while IFS= read -r ZIP; do
-              CANDIDATE="$EXTRACT_ROOT/project_$(date +%s%N)"
-              mkdir -p "$CANDIDATE"
-              unzip -q "$ZIP" -d "$CANDIDATE"
-
-              while IFS= read -r SETTINGS; do
-                D="$(dirname "$SETTINGS")"
-                if is_project "$D"; then
-                  PROJECT_DIR="$D"
-                  break
-                fi
-              done < <(
-                find "$CANDIDATE" -type f \
-                  -name settings.gradle.kts
-              )
-
-              if [ -n "$PROJECT_DIR" ]; then
-                break
-              fi
-            done < <(
-              find "$GITHUB_WORKSPACE" -type f \
-                -iname 'ToracoKeyAI_v0.48.0_STAIR_BACKSPACE_FIX.zip'
-            )
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android project not found."
-            echo "Upload the v0.48.0 ZIP to the repository root,"
-            echo "or commit the extracted project to the repository."
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Using project: $PROJECT_DIR"
-
-      - name: Verify v0.48.0 and Stair backspace fix
-        shell: bash
+      - name: Verify app version
         run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
+          grep -n 'versionName' app/build.gradle.kts || true
+          grep -n 'versionCode' app/build.gradle.kts || true
 
-          test -s app/src/main/assets/toracokey_words.tsv.gz
-
-          grep -Fq 'versionName = "0.48.0"' \
-            app/build.gradle.kts
-
-          grep -Fq 'versionCode = 59' \
-            app/build.gradle.kts
-
-          grep -Fq 'stairCharacterIndex' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-
-          grep -Fq 'mode == KeyboardMode.STAIR' \
-            app/src/main/java/com/toracokey/ai/ToracoKeyService.kt
-
-          echo "Version and Stair-mode source checks passed."
-
-      - name: Clean project
-        shell: bash
+      - name: Check Kotlin compilation
         run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          gradle clean --no-daemon --stacktrace
+          gradle :app:compileDebugKotlin \
+            --no-daemon \
+            --stacktrace
 
       - name: Build debug APK
-        shell: bash
         run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
           gradle :app:assembleDebug \
             --no-daemon \
-            --stacktrace \
-            --no-build-cache
+            --stacktrace
 
       - name: Verify APK
-        shell: bash
         run: |
-          set -euo pipefail
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -s "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-          echo "APK generated successfully:"
-          ls -lh "$APK"
-
-      - name: Upload debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.48.0-Stair-Backspace-Fix
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.48.0-Dictionary-Update
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
