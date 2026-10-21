@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.48.0 - Dictionary Dedup Fix
+name: Build ToracoKey AI v0.48.1 - Dictionary Fix
 
 on:
   workflow_dispatch:
@@ -28,6 +28,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Avoid android-actions/setup-android because
+      # the previous workflow failed installing package "tools".
       - name: Configure Android SDK
         shell: bash
         run: |
@@ -37,13 +39,9 @@ jobs:
             -type f -name sdkmanager -print -quit)"
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "::error::Android sdkmanager not found."
+            echo "::error::sdkmanager not found in Android SDK."
             exit 1
           fi
-
-          echo "SDK manager: $SDKMANAGER"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses \
             >/dev/null 2>&1 || true
@@ -63,10 +61,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          ZIP="ToracoKeyAI_v0.48.0_DICTIONARY_DEDUP_FIX.zip"
+          ZIP="ToracoKeyAI_v0.48.1_DICTIONARY_SUGGESTIONS_DEDUP.zip"
 
           if [ ! -f "$ZIP" ]; then
-            echo "::error::Project ZIP missing: $ZIP"
+            echo "::error::Project ZIP not found: $ZIP"
             find . -maxdepth 2 -type f -iname '*.zip'
             exit 1
           fi
@@ -88,7 +86,7 @@ jobs:
 
           if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ] &&
              [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
-            echo "::error::App Gradle file missing."
+            echo "::error::App Gradle file not found."
             exit 1
           fi
 
@@ -116,17 +114,18 @@ jobs:
           set -euo pipefail
           APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
-          test -s "$APK" || {
+          if [ ! -s "$APK" ]; then
             echo "::error::APK was not generated."
+            find "$PROJECT_DIR/app/build/outputs" -type f || true
             exit 1
-          }
+          fi
 
           ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.48.0-Dictionary-Dedup-Fix
+          name: ToracoKeyAI-v0.48.1-Dictionary-Fix
           path: extracted/**/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
