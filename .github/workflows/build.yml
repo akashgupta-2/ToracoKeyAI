@@ -26,28 +26,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
+      - name: Configure Android SDK
         shell: bash
         run: |
           set -euo pipefail
 
-          SDKMANAGER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools" \
-            -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::Android SDK sdkmanager not found."
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            echo "::error::Android SDK was not found on runner."
             exit 1
           fi
 
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
-          "$SDKMANAGER" --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          echo "Android SDK: $SDK_ROOT"
+          ls -la "$SDK_ROOT"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -60,10 +56,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ ! -f settings.gradle.kts ] || [ ! -f app/build.gradle.kts ]; then
-            echo "::error::Android Gradle project files were not found at repository root."
-            echo "Repository files:"
-            ls -la
+          if [ ! -f settings.gradle.kts ]; then
+            echo "::error::settings.gradle.kts not found at repository root."
+            exit 1
+          fi
+
+          if [ ! -f app/build.gradle.kts ]; then
+            echo "::error::app/build.gradle.kts not found."
             exit 1
           fi
 
@@ -72,13 +71,13 @@ jobs:
           if [ -s app/src/main/assets/toracokey_words.tsv.gz ]; then
             echo "Dictionary asset found."
           else
-            echo "::warning::Dictionary asset is missing or empty."
+            echo "::warning::Dictionary asset missing or empty."
           fi
 
           if [ -s app/src/main/assets/gboard_shortcuts.tsv ]; then
             echo "Shortcut asset found."
           else
-            echo "::warning::Shortcut asset is missing or empty."
+            echo "::warning::Shortcut asset missing or empty."
           fi
 
       - name: Build debug APK
@@ -94,7 +93,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -s "$APK" ]; then
