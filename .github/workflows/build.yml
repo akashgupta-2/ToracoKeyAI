@@ -1,3 +1,4 @@
+
 name: Build ToracoKey AI v0.48.1 - Dictionary Suggestions Fix
 
 on:
@@ -20,11 +21,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Locate Android SDK and install required packages
         shell: bash
@@ -56,69 +56,52 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+          cache-disabled: true
 
       - name: Verify project and dictionary assets
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Checking Android project files..."
-
           test -f settings.gradle.kts
           test -f app/build.gradle.kts
-
-          echo "Checking dictionary assets..."
-
           test -s app/src/main/assets/toracokey_words.tsv.gz
           test -s app/src/main/assets/gboard_shortcuts.tsv
-
-          echo "Validating dictionary contents..."
 
           python3 - <<'PYCODE'
           import gzip
           from pathlib import Path
           from collections import Counter
 
-          path = Path(
-              "app/src/main/assets/toracokey_words.tsv.gz"
-          )
+          path = Path("app/src/main/assets/toracokey_words.tsv.gz")
 
           with gzip.open(path, "rt", encoding="utf-8") as f:
-              rows = [
-                  line.strip()
-                  for line in f
-                  if line.strip()
-              ]
+              rows = [line.strip() for line in f if line.strip()]
 
-          words = []
-
-          for row in rows:
-              word = row.split("\t", 1)[0].strip().casefold()
-              if word:
-                  words.append(word)
+          words = [
+              row.split("\t", 1)[0].strip().casefold()
+              for row in rows
+              if row.split("\t", 1)[0].strip()
+          ]
 
           if not words:
               raise SystemExit("ERROR: Dictionary is empty.")
 
           counts = Counter(words)
-          unique_count = len(counts)
-          duplicate_count = sum(
-              count - 1 for count in counts.values()
-          )
+          duplicate_count = sum(count - 1 for count in counts.values())
 
           print(f"Dictionary entries: {len(words)}")
-          print(f"Unique normalized words: {unique_count}")
+          print(f"Unique normalized words: {len(counts)}")
           print(f"Duplicate entries: {duplicate_count}")
 
           if duplicate_count:
-              print(
-                  "::warning::Duplicate normalized words "
-                  "were found. Continuing the build."
-              )
+              print("::warning::Duplicate words found; continuing build.")
 
-          print("Dictionary asset is readable.")
+          print("Dictionary validation passed.")
           PYCODE
 
       - name: Build debug APK
@@ -134,14 +117,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           APK="app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -s "$APK" ]; then
-            echo "::error::APK was not generated."
-            exit 1
-          fi
-
+          test -s "$APK"
           ls -lh "$APK"
 
       - name: Upload APK artifact
