@@ -34,7 +34,7 @@ jobs:
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 
           if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
-            echo "::error::Android SDK was not found on runner."
+            echo "::error::Android SDK was not found."
             exit 1
           fi
 
@@ -42,31 +42,82 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
-          echo "Android SDK: $SDK_ROOT"
-          ls -la "$SDK_ROOT"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" \
+            -type f -name sdkmanager -print -quit 2>/dev/null || true)"
 
-      - name: Set up Gradle
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager was not found."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Check Android project
+      - name: Find Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ ! -f settings.gradle.kts ]; then
-            echo "::error::settings.gradle.kts not found at repository root."
+          echo "Repository checkout location:"
+          pwd
+
+          echo "Repository files:"
+          find . -maxdepth 4 \
+            \( -name .git -o -name .gradle \) -prune \
+            -o -type f \
+            \( -name settings.gradle.kts \
+               -o -name settings.gradle \) -print
+
+          PROJECT_ROOT=""
+
+          while IFS= read -r SETTINGS_FILE; do
+            CANDIDATE="${SETTINGS_FILE%/*}"
+
+            if [ "$CANDIDATE" = "$SETTINGS_FILE" ]; then
+              CANDIDATE="."
+            fi
+
+            if [ -f "$CANDIDATE/app/build.gradle.kts" ] \
+              || [ -f "$CANDIDATE/app/build.gradle" ]; then
+              PROJECT_ROOT="$CANDIDATE"
+              break
+            fi
+          done < <(
+            find . \
+              \( -name .git -o -name .gradle -o -name build \) -prune \
+              -o -type f \
+              \( -name settings.gradle.kts \
+                 -o -name settings.gradle \) -print
+          )
+
+          if [ -z "$PROJECT_ROOT" ]; then
+            echo "::error::Could not find the Android project."
+            echo "Expected settings.gradle(.kts) and app/build.gradle(.kts)."
+            echo "Check that the ZIP contents were uploaded to GitHub."
             exit 1
           fi
 
-          if [ ! -f app/build.gradle.kts ]; then
-            echo "::error::app/build.gradle.kts not found."
-            exit 1
-          fi
+          PROJECT_ROOT="$(realpath "$PROJECT_ROOT")"
 
-          echo "Android project files found."
+          echo "ANDROID_PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "Found Android project: $PROJECT_ROOT"
+
+      - name: Verify dictionary assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$ANDROID_PROJECT_ROOT"
 
           if [ -s app/src/main/assets/toracokey_words.tsv.gz ]; then
             echo "Dictionary asset found."
@@ -84,6 +135,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          cd "$ANDROID_PROJECT_ROOT"
+
           gradle :app:assembleDebug \
             --no-daemon \
             --stacktrace \
@@ -93,7 +147,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          APK="$ANDROID_PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -s "$APK" ]; then
             echo "::error::APK was not generated."
@@ -106,6 +161,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ToracoKeyAI-v0.48.1-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.ANDROID_PROJECT_ROOT }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
