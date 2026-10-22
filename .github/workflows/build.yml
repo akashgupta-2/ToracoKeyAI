@@ -1,4 +1,4 @@
-name: Build ToracoKey AI v0.48.1 - Dictionary Fix
+name: Build ToracoKey AI v0.48.1 - Dictionary Suggestions Fix
 
 on:
   workflow_dispatch:
@@ -15,9 +15,6 @@ jobs:
     name: Build Android APK
     runs-on: ubuntu-latest
 
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,104 +25,97 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Avoid android-actions/setup-android because
-      # the previous workflow failed installing package "tools".
-      - name: Configure Android SDK
+      - name: Locate Android SDK and install required packages
         shell: bash
         run: |
           set -euo pipefail
 
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f -name sdkmanager -print -quit)"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager not found in Android SDK."
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            echo "::error::Android SDK was not found."
             exit 1
           fi
 
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses \
-            >/dev/null 2>&1 || true
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
 
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" \
+            -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager was not found."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+          cache-disabled: true
 
-      - name: Extract Android project
+      - name: Verify project and dictionary assets
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="ToracoKeyAI_v0.48.1_DICTIONARY_SUGGESTIONS_DEDUP.zip"
+          test -f settings.gradle.kts
+          test -f app/build.gradle.kts
+          test -s app/src/main/assets/toracokey_words.tsv.gz
+          test -s app/src/main/assets/gboard_shortcuts.tsv
 
-          if [ ! -f "$ZIP" ]; then
-            echo "::error::Project ZIP not found: $ZIP"
-            find . -maxdepth 2 -type f -iname '*.zip'
-            exit 1
-          fi
+          grep -Fq 'versionName = "0.48.1"' app/build.gradle.kts
+          grep -Fq 'versionCode = 60' app/build.gradle.kts
+          grep -Fq 'const val APP_VERSION = "0.48.1"' \
+            app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          grep -Fq 'Deduplicate defensively' \
+            app/src/main/java/com/toracokey/ai/WordSuggestions.kt
 
-          mkdir -p extracted
-          unzip -oq "$ZIP" -d extracted
+          python3 - <<'PYCODE'
+          import gzip
+          from pathlib import Path
 
-          SETTINGS="$(find extracted -type f \
-            \( -name settings.gradle.kts -o -name settings.gradle \) \
-            -print -quit)"
+          p = Path('app/src/main/assets/toracokey_words.tsv.gz')
 
-          if [ -z "$SETTINGS" ]; then
-            echo "::error::No Gradle settings file found in ZIP."
-            find extracted -maxdepth 5 -type f | head -n 100
-            exit 1
-          fi
+          with gzip.open(p, 'rt', encoding='utf-8') as f:
+              rows = [line.rstrip('\n') for line in f if line.strip()]
 
-          PROJECT_DIR="$(dirname "$SETTINGS")"
+          words = [
+              row.split('\t', 1)[0].strip().lower()
+              for row in rows
+              if '\t' in row
+          ]
 
-          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ] &&
-             [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
-            echo "::error::App Gradle file not found."
-            exit 1
-          fi
+          if not words:
+              raise SystemExit(
+                  'Dictionary asset is empty or malformed'
+              )
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project directory: $PROJECT_DIR"
+          if len(words) != len(set(words)):
+              raise SystemExit(
+                  'Duplicate normalized words found in dictionary asset'
+              )
+
+          print(f'Validated {len(words)} unique dictionary words')
+          PYCODE
 
       - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew :app:assembleDebug \
-              --no-daemon --stacktrace
-          else
-            gradle :app:assembleDebug \
-              --no-daemon --stacktrace
-          fi
+        run: gradle :app:assembleDebug --no-daemon --stacktrace --console=plain
 
       - name: Verify APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -s "$APK" ]; then
-            echo "::error::APK was not generated."
-            find "$PROJECT_DIR/app/build/outputs" -type f || true
-            exit 1
-          fi
-
-          ls -lh "$APK"
+        run: test -s app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.48.1-Dictionary-Fix
-          path: extracted/**/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.48.1-Dictionary-Suggestions-Fix
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
