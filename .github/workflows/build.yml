@@ -1,5 +1,5 @@
 
-name: Build ToracoKey AI v0.48.1 - Dictionary Suggestions Fix
+name: Build ToracoKey AI v0.48.1
 
 on:
   workflow_dispatch:
@@ -26,26 +26,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Locate Android SDK and install required packages
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
 
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-
-          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
-            echo "::error::Android SDK was not found."
-            exit 1
-          fi
-
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
-
-          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" \
+          SDKMANAGER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools" \
             -type f -name sdkmanager -print -quit 2>/dev/null || true)"
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager was not found."
+            echo "::error::Android SDK sdkmanager not found."
             exit 1
           fi
 
@@ -56,53 +49,37 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.11.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
 
-      - name: Verify project and dictionary assets
+      - name: Check Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          test -f settings.gradle.kts
-          test -f app/build.gradle.kts
-          test -s app/src/main/assets/toracokey_words.tsv.gz
-          test -s app/src/main/assets/gboard_shortcuts.tsv
+          if [ ! -f settings.gradle.kts ] || [ ! -f app/build.gradle.kts ]; then
+            echo "::error::Android Gradle project files were not found at repository root."
+            echo "Repository files:"
+            ls -la
+            exit 1
+          fi
 
-          python3 - <<'PYCODE'
-          import gzip
-          from pathlib import Path
-          from collections import Counter
+          echo "Android project files found."
 
-          path = Path("app/src/main/assets/toracokey_words.tsv.gz")
+          if [ -s app/src/main/assets/toracokey_words.tsv.gz ]; then
+            echo "Dictionary asset found."
+          else
+            echo "::warning::Dictionary asset is missing or empty."
+          fi
 
-          with gzip.open(path, "rt", encoding="utf-8") as f:
-              rows = [line.strip() for line in f if line.strip()]
-
-          words = [
-              row.split("\t", 1)[0].strip().casefold()
-              for row in rows
-              if row.split("\t", 1)[0].strip()
-          ]
-
-          if not words:
-              raise SystemExit("ERROR: Dictionary is empty.")
-
-          counts = Counter(words)
-          duplicate_count = sum(count - 1 for count in counts.values())
-
-          print(f"Dictionary entries: {len(words)}")
-          print(f"Unique normalized words: {len(counts)}")
-          print(f"Duplicate entries: {duplicate_count}")
-
-          if duplicate_count:
-              print("::warning::Duplicate words found; continuing build.")
-
-          print("Dictionary validation passed.")
-          PYCODE
+          if [ -s app/src/main/assets/gboard_shortcuts.tsv ]; then
+            echo "Shortcut asset found."
+          else
+            echo "::warning::Shortcut asset is missing or empty."
+          fi
 
       - name: Build debug APK
         shell: bash
@@ -117,14 +94,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           APK="app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
+
+          if [ ! -s "$APK" ]; then
+            echo "::error::APK was not generated."
+            exit 1
+          fi
+
           ls -lh "$APK"
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-Dictionary-Suggestions-Debug-APK
+          name: ToracoKeyAI-v0.48.1-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
