@@ -1,5 +1,5 @@
 
-name: Build ToracoKey AI v0.48.1
+name: Build ToracoKey AI v0.49.0
 
 on:
   workflow_dispatch:
@@ -21,146 +21,53 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure Android SDK
-        shell: bash
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
         run: |
-          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-
-          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
-            echo "::error::Android SDK was not found."
-            exit 1
-          fi
-
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-
-          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" \
-            -type f -name sdkmanager -print -quit 2>/dev/null || true)"
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager was not found."
-            exit 1
-          fi
-
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-
-          "$SDKMANAGER" --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Set up Gradle 8.11.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-          cache-disabled: true
 
-      - name: Find Android project
-        shell: bash
+      - name: Verify version and kill-switch
         run: |
           set -euo pipefail
+          grep -Fq 'versionName = "0.49.0"' app/build.gradle.kts
+          grep -Fq 'versionCode = 60' app/build.gradle.kts
+          grep -Fq 'const val APP_VERSION = "0.49.0"' app/src/main/java/com/toracokey/ai/DeviceControl.kt
+          grep -Fq 'typingEnabled' backend-policy-router.js
+          grep -Fq 'aiEnabled' backend-policy-router.js
+          grep -Fq 'if (!next.typingEnabled) next.aiEnabled = false' backend-policy-router.js
+          echo "Version and kill-switch checks passed."
 
-          echo "Repository checkout location:"
-          pwd
+      - name: Clean project
+        run: gradle clean --no-daemon --stacktrace --console=plain
 
-          echo "Repository files:"
-          find . -maxdepth 4 \
-            \( -name .git -o -name .gradle \) -prune \
-            -o -type f \
-            \( -name settings.gradle.kts \
-               -o -name settings.gradle \) -print
+      - name: Compile Kotlin
+        run: gradle :app:compileDebugKotlin --no-daemon --stacktrace --console=plain
 
-          PROJECT_ROOT=""
-
-          while IFS= read -r SETTINGS_FILE; do
-            CANDIDATE="${SETTINGS_FILE%/*}"
-
-            if [ "$CANDIDATE" = "$SETTINGS_FILE" ]; then
-              CANDIDATE="."
-            fi
-
-            if [ -f "$CANDIDATE/app/build.gradle.kts" ] \
-              || [ -f "$CANDIDATE/app/build.gradle" ]; then
-              PROJECT_ROOT="$CANDIDATE"
-              break
-            fi
-          done < <(
-            find . \
-              \( -name .git -o -name .gradle -o -name build \) -prune \
-              -o -type f \
-              \( -name settings.gradle.kts \
-                 -o -name settings.gradle \) -print
-          )
-
-          if [ -z "$PROJECT_ROOT" ]; then
-            echo "::error::Could not find the Android project."
-            echo "Expected settings.gradle(.kts) and app/build.gradle(.kts)."
-            echo "Check that the ZIP contents were uploaded to GitHub."
-            exit 1
-          fi
-
-          PROJECT_ROOT="$(realpath "$PROJECT_ROOT")"
-
-          echo "ANDROID_PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-          echo "Found Android project: $PROJECT_ROOT"
-
-      - name: Verify dictionary assets
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ANDROID_PROJECT_ROOT"
-
-          if [ -s app/src/main/assets/toracokey_words.tsv.gz ]; then
-            echo "Dictionary asset found."
-          else
-            echo "::warning::Dictionary asset missing or empty."
-          fi
-
-          if [ -s app/src/main/assets/gboard_shortcuts.tsv ]; then
-            echo "Shortcut asset found."
-          else
-            echo "::warning::Shortcut asset missing or empty."
-          fi
-
-      - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ANDROID_PROJECT_ROOT"
-
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace \
-            --console=plain
+      - name: Build APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace --console=plain
 
       - name: Verify APK
-        shell: bash
         run: |
-          set -euo pipefail
-
-          APK="$ANDROID_PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -s "$APK" ]; then
-            echo "::error::APK was not generated."
-            exit 1
-          fi
-
-          ls -lh "$APK"
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ToracoKeyAI-v0.48.1-debug
-          path: ${{ env.ANDROID_PROJECT_ROOT }}/app/build/outputs/apk/debug/app-debug.apk
+          name: ToracoKeyAI-v0.49.0-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
